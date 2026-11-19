@@ -14,6 +14,7 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -34,7 +35,8 @@ import java.util.Locale;
 public class OverlayService extends Service implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final String CHANNEL_ID = "aim_coach_overlay";
     private static final String PREFS = "coach_settings";
-    private static final int BUBBLE_SIZE_DP = 56;
+    private static final int BUBBLE_SIZE_DP = 48;
+    private static final int BUBBLE_VISIBLE_DP = 40;
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
@@ -190,7 +192,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         bubbleBackground.setShape(GradientDrawable.OVAL);
         bubbleBackground.setColor(Color.argb(238, 17, 27, 42));
         bubbleBackground.setStroke(dp(2), Color.rgb(53, 169, 255));
-        bubble.setBackground(bubbleBackground);
+        bubble.setBackground(new InsetDrawable(bubbleBackground, dp((BUBBLE_SIZE_DP - BUBBLE_VISIBLE_DP) / 2)));
         FrameLayout.LayoutParams bubbleLp = new FrameLayout.LayoutParams(
                 dp(BUBBLE_SIZE_DP), dp(BUBBLE_SIZE_DP), Gravity.TOP | Gravity.START);
         panel.addView(bubble, bubbleLp);
