@@ -49,7 +49,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private final Runnable metricsUpdater = new Runnable() {
         @Override public void run() {
             updateValues();
-            if (panel != null) mainHandler.postDelayed(this, 350);
+            if (panel != null) mainHandler.postDelayed(this, 300);
         }
     };
 
@@ -80,7 +80,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         Notification notification = builder
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentTitle("OneState Aim Coach فعال است")
-                .setContentText("پنل تنظیمات و بازخورد تصویری آماده است")
+                .setContentText("پنل تنظیمات و نشانگرهای تصویری آماده است")
                 .setContentIntent(pending)
                 .setOngoing(true)
                 .build();
@@ -142,7 +142,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
         mp.topMargin = dp(6);
         details.addView(motionValue, mp);
-        TextView hint = label("کادرها: بازیکن/شخص احتمالی، نه تشخیص قطعی دشمن", 10, Color.LTGRAY, false);
+        TextView hint = label("نشانگرهای دایره‌ای کوچک: شخص/بازیکن احتمالی", 10, Color.LTGRAY, false);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
@@ -214,9 +214,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             if (ScreenMotionState.active) {
                 ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
                 int count = boxes == null ? 0 : boxes.length;
-                motionValue.setText("تغییر تصویر: " +
-                        String.format(Locale.US, "%.1f", ScreenMotionState.motionScore) +
-                        " | کاندیداها: " + count);
+                motionValue.setText("تحلیل زنده | کاندیداها: " + count);
             } else {
                 motionValue.setText("تحلیل زنده: خاموش");
             }
@@ -225,20 +223,23 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     }
 
     private final class DetectionDrawingView extends View {
-        private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint markerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint centerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         DetectionDrawingView() {
             super(OverlayService.this);
-            boxPaint.setColor(Color.rgb(255, 70, 70));
-            boxPaint.setStyle(Paint.Style.STROKE);
-            boxPaint.setStrokeWidth(dp(2));
+            markerPaint.setColor(Color.rgb(72, 225, 165));
+            markerPaint.setStyle(Paint.Style.STROKE);
+            markerPaint.setStrokeWidth(dp(2));
+            centerPaint.setColor(Color.WHITE);
+            centerPaint.setStyle(Paint.Style.FILL);
             labelPaint.setColor(Color.WHITE);
-            labelPaint.setTextSize(dp(11));
+            labelPaint.setTextSize(dp(10));
             labelPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
-            labelBackground.setColor(Color.argb(220, 145, 28, 28));
+            labelBackground.setColor(Color.argb(210, 18, 62, 54));
             setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
@@ -249,27 +250,32 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             if (boxes == null) return;
             float canvasWidth = getWidth();
             float canvasHeight = getHeight();
+            float radius = dp(8);
 
             for (ScreenMotionState.PlayerBox box : boxes) {
-                RectF rect = new RectF(
-                        box.left * canvasWidth,
-                        box.top * canvasHeight,
-                        box.right * canvasWidth,
-                        box.bottom * canvasHeight);
-                if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
-                canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
+                float centerX = ((box.left + box.right) * 0.5f) * canvasWidth;
+                float centerY = ((box.top + box.bottom) * 0.5f) * canvasHeight;
+                if (centerX < 0 || centerY < 0 || centerX > canvasWidth || centerY > canvasHeight) {
+                    continue;
+                }
 
-                String caption = String.format(Locale.US, "PLAYER? %d%%",
-                        Math.round(box.confidence * 100f));
+                // Small, non-interactive marker only; no box or game-input control.
+                canvas.drawCircle(centerX, centerY, radius, markerPaint);
+                canvas.drawCircle(centerX, centerY, dp(2), centerPaint);
+
+                String id = box.trackId > 0 ? "P" + box.trackId : "P?";
+                String caption = id + " " + Math.round(box.confidence * 100f) + "%";
                 float textWidth = labelPaint.measureText(caption);
-                float labelTop = Math.max(dp(20), rect.top - dp(4));
+                float labelX = Math.min(canvasWidth - textWidth - dp(12), centerX + dp(12));
+                labelX = Math.max(dp(4), labelX);
+                float baseline = Math.max(dp(18), centerY - dp(9));
                 RectF bg = new RectF(
-                        rect.left,
-                        labelTop - dp(18),
-                        rect.left + textWidth + dp(10),
-                        labelTop);
+                        labelX,
+                        baseline - dp(14),
+                        labelX + textWidth + dp(8),
+                        baseline + dp(3));
                 canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
-                canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
+                canvas.drawText(caption, labelX + dp(4), baseline, labelPaint);
             }
         }
     }

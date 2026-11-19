@@ -13,13 +13,21 @@ public final class ScreenMotionState {
         public final float right;
         public final float bottom;
         public final float confidence;
+        public final int trackId;
 
         public PlayerBox(float left, float top, float right, float bottom, float confidence) {
+            this(left, top, right, bottom, confidence, 0);
+        }
+
+        public PlayerBox(
+                float left, float top, float right, float bottom,
+                float confidence, int trackId) {
             this.left = clamp(left);
             this.top = clamp(top);
             this.right = clamp(right);
             this.bottom = clamp(bottom);
             this.confidence = clamp(confidence);
+            this.trackId = Math.max(0, trackId);
         }
 
         private static float clamp(float value) {

@@ -38,22 +38,22 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(15, 23, 34));
         scroll.addView(root);
 
-        root.addView(text("OneState Aim Coach", 26, Color.WHITE, true));
+        root.addView(text("OneState Aim Coach 0.4", 26, Color.WHITE, true));
         addTop(root, text("مربی زندهٔ تصویر و بازخورد هنگام اجرای بازی", 15, Color.LTGRAY, false), 5);
-        addTop(root, text("تشخیص کادرِ شخص/بازیکن احتمالی از تصویر قابل‌مشاهدهٔ صفحه", 14, Color.rgb(121, 220, 170), true), 18);
+        addTop(root, text("نشانگرهای دایره‌ای کوچک با شناسهٔ موقت برای شخص/بازیکن احتمالی", 14, Color.rgb(121, 220, 170), true), 18);
 
         addSlider(root, "حساسیت دوربین (مرجع شخصی)", "camera_sensitivity", 50);
         addSlider(root, "حساسیت نشانه‌گیری (مرجع شخصی)", "aim_sensitivity", 50);
         addSlider(root, "شدت یادآوری کنترل لگد", "recoil_reminder", 50);
 
-        addTop(root, text("تشخیص زندهٔ بازیکن احتمالی", 18, Color.WHITE, true), 22);
+        addTop(root, text("تشخیص و ردیابی تصویری", 18, Color.WHITE, true), 22);
         addTop(root, text(
-                "مدل اولیه EfficientDet Lite0 از دستهٔ person استفاده می‌کند و کادر را روی تصویر بازی می‌کشد. " +
-                "این مدل برای بازی OneState آموزش ندیده است؛ ممکن است بازیکن را از دست بدهد یا NPC و هم‌تیمی را هم علامت بزند. " +
-                "پس در این نسخه تشخیص دشمن از دوست هنوز قابل‌اتکا نیست. تصویر فقط روی گوشی پردازش می‌شود و ذخیره یا ارسال نمی‌شود.",
+                "مدل EfficientDet Lite0 فقط دستهٔ عمومی person را تشخیص می‌دهد. شناسه‌ها و هموارسازی موقعیت، " +
+                "نشانگرها را بین تشخیص‌های پیاپی پایدارتر می‌کنند؛ اما دشمن را از هم‌تیمی یا NPC تشخیص نمی‌دهند. " +
+                "تصویر فقط روی گوشی پردازش می‌شود و ذخیره یا ارسال نمی‌شود.",
                 13, Color.LTGRAY, false), 8);
 
-        Button startAnalysis = button("شروع تشخیص زنده و نمایش کادرها");
+        Button startAnalysis = button("شروع تشخیص زنده و نمایش نشانگرها");
         addTop(root, startAnalysis, 10);
         startAnalysis.setOnClickListener(v -> requestLiveAnalysis());
 
@@ -72,13 +72,13 @@ public class MainActivity extends Activity {
         addTop(root, startOverlay, 8);
         startOverlay.setOnClickListener(v -> enableOverlay());
 
-        Button stopOverlay = button("بستن پنل و کادرهای شناور");
+        Button stopOverlay = button("بستن پنل و نشانگرهای شناور");
         addTop(root, stopOverlay, 8);
         stopOverlay.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
 
         addTop(root, text(
-                "برنامه ورودی بازی را کنترل نمی‌کند، نشانه را جابه‌جا نمی‌کند و شلیک خودکار ندارد. " +
-                "تشخیص فقط از پیکسل‌های قابل‌مشاهدهٔ صفحه است و هیچ اطلاعاتی از پشت دیوار یا حافظهٔ بازی نمی‌خواند.",
+                "این نسخه فقط موقعیت اشیای قابل‌مشاهده را روی تصویر علامت می‌زند. ورودی بازی را کنترل نمی‌کند، " +
+                "نشانه را جابه‌جا نمی‌کند، شلیک خودکار ندارد و اطلاعاتی از پشت دیوار یا حافظهٔ بازی نمی‌خواند.",
                 12, Color.rgb(180, 190, 202), false), 18);
 
         setContentView(scroll);
@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
         if (overlayStatus != null) {
             overlayStatus.setText(Settings.canDrawOverlays(this)
                     ? "مجوز نمایش روی برنامه‌های دیگر فعال است."
-                    : "برای پنل و کادرهای زنده، مجوز نمایش روی برنامه‌های دیگر لازم است.");
+                    : "برای پنل و نشانگرهای زنده، مجوز نمایش روی برنامه‌های دیگر لازم است.");
         }
         if (analysisStatus != null) {
             if (ScreenMotionState.active) {

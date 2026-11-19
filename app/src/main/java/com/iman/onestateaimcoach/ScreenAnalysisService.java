@@ -37,9 +37,10 @@ public class ScreenAnalysisService extends Service {
     private static final String EXTRA_RESULT = "projection_result";
     private static final String EXTRA_DATA = "projection_data";
     private static final long MIN_FRAME_INTERVAL_MS = 110;
-    private static final long MIN_DETECTION_INTERVAL_MS = 350;
+    private static final long MIN_DETECTION_INTERVAL_MS = 250;
     private static final float PERSON_SCORE_THRESHOLD = 0.38f;
 
+    private final PlayerTracker playerTracker = new PlayerTracker();
     private HandlerThread workerThread;
     private Handler worker;
     private MediaProjection projection;
@@ -190,9 +191,8 @@ public class ScreenAnalysisService extends Service {
                             confidence));
                 }
 
-                ScreenMotionState.detectedPlayers =
-                        boxes.toArray(new ScreenMotionState.PlayerBox[0]);
-                ScreenMotionState.level = boxes.size() == 0
+                ScreenMotionState.detectedPlayers = playerTracker.update(boxes);
+                ScreenMotionState.level = boxes.isEmpty()
                         ? "بازیکن قابل تشخیص نیست"
                         : boxes.size() + " بازیکن احتمالی";
             } catch (Exception ignored) {
@@ -300,6 +300,7 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.active = false;
         ScreenMotionState.level = "خاموش";
         ScreenMotionState.detectedPlayers = new ScreenMotionState.PlayerBox[0];
+        playerTracker.reset();
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (projection != null) {
