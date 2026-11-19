@@ -1,0 +1,230 @@
+package com.iman.onestateaimcoach;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
+import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.IBinder;
+import android.util.DisplayMetrics;
+import android.view.Display;
+import android.view.WindowManager;
+
+import java.nio.ByteBuffer;
+
+public class ScreenAnalysisService extends Service {
+    private static final String CHANNEL_ID = "aim_coach_analysis";
+    private static final int NOTIFICATION_ID = 2;
+    private static final String EXTRA_RESULT = "projection_result";
+    private static final String EXTRA_DATA = "projection_data";
+
+    private HandlerThread workerThread;
+    private Handler worker;
+    private MediaProjection projection;
+    private VirtualDisplay virtualDisplay;
+    private ImageReader imageReader;
+    private byte[] previous;
+    private long lastFrameAt;
+    private float smoothedScore;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        createChannel();
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent == null || !intent.hasExtra(EXTRA_DATA)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        startAsForeground();
+        try {
+            int resultCode = intent.getIntExtra(EXTRA_RESULT, 0);
+            Intent data = intent.getParcelableExtra(EXTRA_DATA);
+            MediaProjectionManager manager =
+                    (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            projection = manager.getMediaProjection(resultCode, data);
+            if (projection == null) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+
+            workerThread = new HandlerThread("AimCoachScreenAnalysis");
+            workerThread.start();
+            worker = new Handler(workerThread.getLooper());
+
+            projection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    stopSelf();
+                }
+            }, worker);
+
+            startCapture();
+            ScreenMotionState.active = true;
+            ScreenMotionState.level = "در حال تحلیل";
+        } catch (Exception exception) {
+            ScreenMotionState.active = false;
+            ScreenMotionState.level = "خطا در شروع";
+            stopSelf();
+        }
+        return START_NOT_STICKY;
+    }
+
+    private void startCapture() {
+        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        Display display = wm.getDefaultDisplay();
+        DisplayMetrics metrics = new DisplayMetrics();
+        display.getRealMetrics(metrics);
+
+        int width = Math.max(320, metrics.widthPixels / 2);
+        int height = Math.max(320, metrics.heightPixels / 2);
+
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
+        imageReader.setOnImageAvailableListener(reader -> {
+            Image image = null;
+            try {
+                image = reader.acquireLatestImage();
+                if (image != null) analyze(image);
+            } catch (Exception ignored) {
+                // A dropped frame must not interrupt the game or the service.
+            } finally {
+                if (image != null) image.close();
+            }
+        }, worker);
+
+        virtualDisplay = projection.createVirtualDisplay(
+                "OneStateAimCoachAnalysis",
+                width,
+                height,
+                metrics.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(),
+                null,
+                worker);
+    }
+
+    private void analyze(Image image) {
+        long now = System.currentTimeMillis();
+        if (now - lastFrameAt < 90) return; // Limit processing to about 11 frames/second.
+        lastFrameAt = now;
+
+        Image.Plane[] planes = image.getPlanes();
+        if (planes.length == 0) return;
+        Image.Plane plane = planes[0];
+        ByteBuffer buffer = plane.getBuffer();
+        int rowStride = plane.getRowStride();
+        int pixelStride = plane.getPixelStride();
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        // Measure only a central patch around the screen center. No opponent detection.
+        int patch = Math.min(112, Math.min(width, height) / 3);
+        int left = Math.max(0, width / 2 - patch / 2);
+        int top = Math.max(0, height / 2 - patch / 2);
+        int sampleStep = 2;
+        int sampleWidth = (patch + sampleStep - 1) / sampleStep;
+        byte[] current = new byte[sampleWidth * sampleWidth];
+        int out = 0;
+
+        for (int y = 0; y < patch; y += sampleStep) {
+            int py = Math.min(height - 1, top + y);
+            for (int x = 0; x < patch; x += sampleStep) {
+                int px = Math.min(width - 1, left + x);
+                int index = py * rowStride + px * pixelStride;
+                if (index + 2 >= buffer.limit()) {
+                    current[out++] = 0;
+                    continue;
+                }
+                int red = buffer.get(index) & 0xff;
+                int green = buffer.get(index + 1) & 0xff;
+                int blue = buffer.get(index + 2) & 0xff;
+                int luminance = (red * 30 + green * 59 + blue * 11) / 100;
+                current[out++] = (byte) luminance;
+            }
+        }
+
+        if (previous != null && previous.length == current.length) {
+            long sum = 0;
+            for (int i = 0; i < current.length; i++) {
+                sum += Math.abs((current[i] & 0xff) - (previous[i] & 0xff));
+            }
+            float raw = (sum / (float) current.length) * 100f / 255f;
+            smoothedScore = smoothedScore == 0f ? raw : (smoothedScore * 0.65f + raw * 0.35f);
+            ScreenMotionState.motionScore = smoothedScore;
+            if (smoothedScore < 1.5f) {
+                ScreenMotionState.level = "تغییر کم";
+            } else if (smoothedScore < 5.0f) {
+                ScreenMotionState.level = "تغییر متوسط";
+            } else {
+                ScreenMotionState.level = "تغییر زیاد";
+            }
+        }
+        previous = current;
+    }
+
+    private void startAsForeground() {
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, CHANNEL_ID)
+                : new Notification.Builder(this);
+        Notification notification = builder
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setContentTitle("OneState Aim Coach")
+                .setContentText("تحلیل محدود تصویر صفحه فعال است")
+                .setOngoing(true)
+                .build();
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
+    }
+
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "تحلیل زنده تصویر", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("اعلان سرویس تحلیل تصویر با اجازه کاربر");
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            manager.createNotificationChannel(channel);
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        ScreenMotionState.active = false;
+        ScreenMotionState.level = "خاموش";
+        if (virtualDisplay != null) virtualDisplay.release();
+        if (imageReader != null) imageReader.close();
+        if (projection != null) {
+            try { projection.stop(); } catch (Exception ignored) {}
+        }
+        if (workerThread != null) {
+            workerThread.quitSafely();
+            workerThread = null;
+        }
+        stopForeground(true);
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+}
