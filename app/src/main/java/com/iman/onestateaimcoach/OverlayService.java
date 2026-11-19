@@ -12,7 +12,9 @@ import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -31,10 +33,18 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private TextView cameraValue;
     private TextView aimValue;
     private TextView recoilValue;
+    private TextView motionValue;
     private boolean collapsed = false;
     private float downRawX, downRawY;
     private int downX, downY;
     private SharedPreferences preferences;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable metricsUpdater = new Runnable() {
+        @Override public void run() {
+            updateValues();
+            if (panel != null) mainHandler.postDelayed(this, 450);
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -63,7 +73,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         Notification notification = builder
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentTitle("OneState Aim Coach فعال است")
-                .setContentText("پنل تنظیمات شناور آماده است")
+                .setContentText("پنل تنظیمات و شاخص حرکت آماده است")
                 .setContentIntent(pending)
                 .setOngoing(true)
                 .build();
@@ -85,7 +95,14 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     }
 
     private void createPanel() {
-        if (panel != null || windowManager == null && (windowManager = (WindowManager) getSystemService(WINDOW_SERVICE)) == null) return;
+        if (panel != null) return;
+        if (windowManager == null) {
+            windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+            if (windowManager == null) {
+                stopSelf();
+                return;
+            }
+        }
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -111,10 +128,14 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         cameraValue = label("", 12, Color.WHITE, false);
         aimValue = label("", 12, Color.WHITE, false);
         recoilValue = label("", 12, Color.WHITE, false);
+        motionValue = label("", 12, Color.rgb(132, 225, 178), true);
         details.addView(cameraValue);
         details.addView(aimValue);
         details.addView(recoilValue);
-        TextView hint = label("اصلاح نشانه فقط دستی", 11, Color.rgb(132, 225, 178), true);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
+        mp.topMargin = dp(6);
+        details.addView(motionValue, mp);
+        TextView hint = label("اصلاح نشانه فقط دستی", 11, Color.LTGRAY, true);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
@@ -158,6 +179,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         params.y = dp(100);
         updateValues();
         windowManager.addView(panel, params);
+        mainHandler.post(metricsUpdater);
     }
 
     private void updateValues() {
@@ -165,6 +187,15 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         cameraValue.setText("دوربین: " + preferences.getInt("camera_sensitivity", 50) + "/100");
         aimValue.setText("نشانه: " + preferences.getInt("aim_sensitivity", 50) + "/100");
         recoilValue.setText("کنترل لگد: " + preferences.getInt("recoil_reminder", 50) + "/100");
+        if (motionValue != null) {
+            if (ScreenMotionState.active) {
+                motionValue.setText("تغییر تصویر مرکز: " +
+                        String.format(java.util.Locale.US, "%.1f", ScreenMotionState.motionScore) +
+                        " | " + ScreenMotionState.level);
+            } else {
+                motionValue.setText("تحلیل زنده: خاموش");
+            }
+        }
     }
 
     @Override
@@ -194,6 +225,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     @Override
     public void onDestroy() {
+        mainHandler.removeCallbacks(metricsUpdater);
         if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(this);
         if (windowManager != null && panel != null) {
             try { windowManager.removeView(panel); } catch (Exception ignored) {}
