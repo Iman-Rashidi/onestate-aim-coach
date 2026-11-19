@@ -3,7 +3,9 @@ package com.iman.onestateaimcoach;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -16,7 +18,12 @@ import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "coach_settings";
+    private static final int REQUEST_OVERLAY = 411;
+    private static final int REQUEST_CAPTURE = 412;
+    private static final String EXTRA_RESULT = "projection_result";
+    private static final String EXTRA_DATA = "projection_data";
     private TextView overlayStatus;
+    private TextView analysisStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,76 +38,113 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(15, 23, 34));
         scroll.addView(root);
 
-        TextView title = text("OneState Aim Coach", 26, Color.WHITE, true);
-        root.addView(title);
-        TextView subtitle = text("ابزار کمکی تنظیمات و تمرکز حین بازی", 15, Color.LTGRAY, false);
-        addTop(root, subtitle, 5);
-
-        TextView online = text("حالت استفاده: قابل استفاده هنگام اجرای بازی", 14, Color.rgb(121, 220, 170), true);
-        addTop(root, online, 18);
+        root.addView(text("OneState Aim Coach", 26, Color.WHITE, true));
+        addTop(root, text("مربی زندهٔ تصویر و تنظیمات برای زمان اجرای بازی", 15, Color.LTGRAY, false), 5);
+        addTop(root, text("تحلیل محدود حرکت تصویر در مرکز صفحه، بدون تشخیص دشمن یا کنترل بازی", 14, Color.rgb(121, 220, 170), true), 18);
 
         addSlider(root, "حساسیت دوربین (مرجع شخصی)", "camera_sensitivity", 50);
         addSlider(root, "حساسیت نشانه‌گیری (مرجع شخصی)", "aim_sensitivity", 50);
         addSlider(root, "شدت یادآوری کنترل لگد", "recoil_reminder", 50);
 
-        TextView noteTitle = text("راهنمای کوتاه کنترل لگد", 18, Color.WHITE, true);
-        addTop(root, noteTitle, 22);
-        TextView note = text(
-                "• حرکت انگشت را نرم و یکنواخت نگه دار.\n" +
-                "• برای هر سلاح، تنظیمات را جداگانه یادداشت کن.\n" +
-                "• هنگام شلیک، اصلاح نشانه را فقط دستی انجام بده.\n" +
-                "• این برنامه ورودی بازی را کنترل یا شلیک را خودکار نمی‌کند.",
-                14, Color.LTGRAY, false);
-        addTop(root, note, 8);
+        addTop(root, text("تحلیل زنده هنگام بازی", 18, Color.WHITE, true), 22);
+        addTop(root, text(
+                "با اجازهٔ ضبط صفحهٔ اندروید، فقط تغییرات تصویری یک ناحیهٔ کوچک در مرکز صفحه اندازه‌گیری می‌شود. " +
+                "فریم‌ها ذخیره یا ارسال نمی‌شوند. عدد خروجی شاخص تغییر تصویر است، نه احتمال اصابت یا تشخیص هدف.",
+                13, Color.LTGRAY, false), 8);
 
-        overlayStatus = text("", 14, Color.LTGRAY, false);
-        addTop(root, overlayStatus, 20);
+        Button startAnalysis = button("شروع تحلیل زندهٔ صفحه");
+        addTop(root, startAnalysis, 10);
+        startAnalysis.setOnClickListener(v -> requestLiveAnalysis());
 
-        Button start = button("فعال‌کردن پنل شناور روی بازی");
-        addTop(root, start, 10);
-        start.setOnClickListener(v -> enableOverlay());
+        Button stopAnalysis = button("توقف تحلیل زنده");
+        addTop(root, stopAnalysis, 8);
+        stopAnalysis.setOnClickListener(v -> stopService(new Intent(this, ScreenAnalysisService.class)));
 
-        Button stop = button("بستن پنل شناور");
-        addTop(root, stop, 8);
-        stop.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
+        analysisStatus = text("", 13, Color.LTGRAY, false);
+        addTop(root, analysisStatus, 8);
 
-        TextView limitation = text(
-                "این نسخه فقط تنظیمات و راهنمای دستی را نشان می‌دهد. " +
-                "هیچ نشانه‌گیری خودکار، شلیک خودکار، خواندن حافظه بازی یا نمایش اطلاعات مخفی ندارد.",
-                12, Color.rgb(180, 190, 202), false);
-        addTop(root, limitation, 18);
+        addTop(root, text("پنل شناور", 18, Color.WHITE, true), 22);
+        overlayStatus = text("", 13, Color.LTGRAY, false);
+        addTop(root, overlayStatus, 8);
+
+        Button startOverlay = button("فعال‌کردن پنل شناور روی بازی");
+        addTop(root, startOverlay, 8);
+        startOverlay.setOnClickListener(v -> enableOverlay());
+
+        Button stopOverlay = button("بستن پنل شناور");
+        addTop(root, stopOverlay, 8);
+        stopOverlay.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
+
+        addTop(root, text(
+                "برنامه ورودی بازی را کنترل نمی‌کند، نشانه را جابه‌جا نمی‌کند، شلیک خودکار ندارد و دشمن یا اطلاعات پنهان را شناسایی نمی‌کند. " +
+                "سازگاری و اثر شاخص حرکت باید روی دستگاه واقعی و در بازی آزمایش شود.",
+                12, Color.rgb(180, 190, 202), false), 18);
 
         setContentView(scroll);
-        refreshOverlayStatus();
+        refreshStatus();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        refreshOverlayStatus();
+        refreshStatus();
+    }
+
+    private void requestLiveAnalysis() {
+        MediaProjectionManager manager =
+                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CAPTURE) {
+            if (resultCode == RESULT_OK && data != null) {
+                Intent service = new Intent(this, ScreenAnalysisService.class);
+                service.putExtra(EXTRA_RESULT, resultCode);
+                service.putExtra(EXTRA_DATA, data);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(service);
+                } else {
+                    startService(service);
+                }
+                if (analysisStatus != null) {
+                    analysisStatus.setText("اجازه صادر شد؛ تحلیل زنده شروع می‌شود.");
+                }
+            } else if (analysisStatus != null) {
+                analysisStatus.setText("اجازهٔ ضبط صفحه داده نشد؛ تحلیل شروع نشد.");
+            }
+        }
     }
 
     private void enableOverlay() {
         if (!Settings.canDrawOverlays(this)) {
             Intent permission = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName()));
-            startActivity(permission);
+            startActivityForResult(permission, REQUEST_OVERLAY);
             return;
         }
         Intent service = new Intent(this, OverlayService.class);
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(service);
         } else {
             startService(service);
         }
-        refreshOverlayStatus();
+        refreshStatus();
     }
 
-    private void refreshOverlayStatus() {
-        if (overlayStatus == null) return;
-        overlayStatus.setText(Settings.canDrawOverlays(this)
-                ? "مجوز نمایش روی برنامه‌های دیگر فعال است."
-                : "برای پنل شناور، مجوز نمایش روی برنامه‌های دیگر لازم است.");
+    private void refreshStatus() {
+        if (overlayStatus != null) {
+            overlayStatus.setText(Settings.canDrawOverlays(this)
+                    ? "مجوز نمایش روی برنامه‌های دیگر فعال است."
+                    : "برای پنل شناور، مجوز نمایش روی برنامه‌های دیگر لازم است.");
+        }
+        if (analysisStatus != null) {
+            analysisStatus.setText(ScreenMotionState.active
+                    ? "تحلیل فعال است: " + ScreenMotionState.level
+                    : "تحلیل صفحه خاموش است.");
+        }
     }
 
     private void addSlider(LinearLayout root, String caption, String key, int fallback) {
