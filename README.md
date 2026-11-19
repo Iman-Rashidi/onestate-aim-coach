@@ -4,7 +4,7 @@ An Android companion intended to run alongside OneState during online play. It u
 
 ## Features
 
-- Compact floating control that starts as a 56dp circular bubble to minimize obstruction during gameplay.
+- Compact floating control that starts as a 40dp visible circular bubble inside a 48dp touch area to minimize obstruction during gameplay.
 - Tap the bubble to expand the settings panel; use the minimize control to return to the bubble.
 - Long-press the bubble to drag it; its position is saved for the next start.
 - The bubble outline changes color while live screen analysis is active.
