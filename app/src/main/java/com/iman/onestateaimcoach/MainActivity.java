@@ -2,28 +2,38 @@ package com.iman.onestateaimcoach;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
-import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class MainActivity extends Activity {
     private static final String PREFS = "coach_settings";
     private static final int REQUEST_OVERLAY = 411;
-    private static final int REQUEST_CAPTURE = 412;
-    private static final String EXTRA_RESULT = "projection_result";
-    private static final String EXTRA_DATA = "projection_data";
+    private static final int REQUEST_VIDEO = 413;
+
     private TextView overlayStatus;
-    private TextView analysisStatus;
+    private TextView videoStatus;
+    private TextView videoResult;
+    private ProgressBar videoProgress;
+    private Button analyzeButton;
+    private Uri selectedVideo;
+    private boolean analyzing = false;
+    private final ExecutorService analysisExecutor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,103 +49,159 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(text("OneState Aim Coach", 26, Color.WHITE, true));
-        addTop(root, text("مربی زندهٔ تصویر و بازخورد هنگام اجرای بازی", 15, Color.LTGRAY, false), 5);
-        addTop(root, text("تشخیص کادرِ شخص/بازیکن احتمالی از تصویر قابل‌مشاهدهٔ صفحه", 14, Color.rgb(121, 220, 170), true), 18);
+        addTop(root, text("ابزار تنظیمات و تحلیل آفلاین ویدئو", 15, Color.LTGRAY, false), 5);
+        addTop(root, text(
+                "ویدئوی ضبط‌شدهٔ OneState را انتخاب کن تا فریم‌ها به‌صورت محلی بررسی شوند. " +
+                "این نسخه هنگام مسابقه بازیکنان را ردیابی یا علامت‌گذاری نمی‌کند.",
+                14, Color.rgb(121, 220, 170), true), 18);
 
         addSlider(root, "حساسیت دوربین (مرجع شخصی)", "camera_sensitivity", 50);
         addSlider(root, "حساسیت نشانه‌گیری (مرجع شخصی)", "aim_sensitivity", 50);
         addSlider(root, "شدت یادآوری کنترل لگد", "recoil_reminder", 50);
 
-        addTop(root, text("تشخیص زندهٔ بازیکن احتمالی", 18, Color.WHITE, true), 22);
+        addTop(root, text("تحلیل ویدئوی ضبط‌شده", 18, Color.WHITE, true), 24);
         addTop(root, text(
-                "مدل اولیه EfficientDet Lite0 از دستهٔ person استفاده می‌کند و کادر را روی تصویر بازی می‌کشد. " +
-                "این مدل برای بازی OneState آموزش ندیده است؛ ممکن است بازیکن را از دست بدهد یا NPC و هم‌تیمی را هم علامت بزند. " +
-                "پس در این نسخه تشخیص دشمن از دوست هنوز قابل‌اتکا نیست. تصویر فقط روی گوشی پردازش می‌شود و ذخیره یا ارسال نمی‌شود.",
+                "برای بهتر دیدن اشخاص کوچک، هر فریم با برش‌های هم‌پوشان ۳×۳ بررسی می‌شود. " +
+                "این روش ممکن است افراد دورتر را بهتر آشکار کند، اما تشخیص آن‌ها را تضمین نمی‌کند؛ " +
+                "مدل همچنان عمومی است و برای شخصیت‌های OneState آموزش ندیده است.",
                 13, Color.LTGRAY, false), 8);
 
-        Button startAnalysis = button("شروع تشخیص زنده و نمایش کادرها");
-        addTop(root, startAnalysis, 10);
-        startAnalysis.setOnClickListener(v -> requestLiveAnalysis());
+        Button selectVideo = button("انتخاب ویدئو از گوشی");
+        addTop(root, selectVideo, 8);
+        selectVideo.setOnClickListener(v -> chooseVideo());
 
-        Button stopAnalysis = button("توقف تشخیص زنده");
-        addTop(root, stopAnalysis, 8);
-        stopAnalysis.setOnClickListener(v -> stopService(new Intent(this, ScreenAnalysisService.class)));
+        videoStatus = text("هنوز ویدئویی انتخاب نشده است.", 13, Color.LTGRAY, false);
+        addTop(root, videoStatus, 8);
 
-        analysisStatus = text("", 13, Color.LTGRAY, false);
-        addTop(root, analysisStatus, 8);
+        analyzeButton = button("شروع تحلیل آفلاین");
+        analyzeButton.setEnabled(false);
+        addTop(root, analyzeButton, 8);
+        analyzeButton.setOnClickListener(v -> startVideoAnalysis());
 
-        addTop(root, text("تنظیمات پنل شناور", 18, Color.WHITE, true), 22);
+        videoProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        videoProgress.setMax(100);
+        videoProgress.setProgress(0);
+        addTop(root, videoProgress, 8);
+
+        videoResult = text("", 13, Color.WHITE, false);
+        videoResult.setTextIsSelectable(true);
+        addTop(root, videoResult, 10);
+
+        addTop(root, text("پنل شناور تنظیمات", 18, Color.WHITE, true), 24);
         overlayStatus = text("", 13, Color.LTGRAY, false);
         addTop(root, overlayStatus, 8);
 
-        Button startOverlay = button("فعال‌کردن پنل شناور روی بازی");
+        Button startOverlay = button("فعال‌کردن پنل شناور");
         addTop(root, startOverlay, 8);
         startOverlay.setOnClickListener(v -> enableOverlay());
 
-        Button stopOverlay = button("بستن پنل و کادرهای شناور");
+        Button stopOverlay = button("بستن پنل شناور");
         addTop(root, stopOverlay, 8);
-        stopOverlay.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
+        stopOverlay.setOnClickListener(v -> stopService(
+                new Intent(this, OverlayService.class)));
 
         addTop(root, text(
-                "برنامه ورودی بازی را کنترل نمی‌کند، نشانه را جابه‌جا نمی‌کند و شلیک خودکار ندارد. " +
-                "تشخیص فقط از پیکسل‌های قابل‌مشاهدهٔ صفحه است و هیچ اطلاعاتی از پشت دیوار یا حافظهٔ بازی نمی‌خواند.",
+                "پنل شناور در حالت جمع‌شده به شکل دایرهٔ کوچک نمایش داده می‌شود. " +
+                "برنامه ورودی بازی، نشانه‌گیری یا شلیک را کنترل نمی‌کند.",
                 12, Color.rgb(180, 190, 202), false), 18);
 
         setContentView(scroll);
         refreshStatus();
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        refreshStatus();
-    }
-
-    private void requestLiveAnalysis() {
-        if (!Settings.canDrawOverlays(this)) {
-            if (analysisStatus != null) {
-                analysisStatus.setText("ابتدا اجازهٔ پنل شناور را فعال کن؛ سپس دوباره شروع را بزن.");
-            }
-            enableOverlay();
-            return;
-        }
-        startOverlayService();
-        MediaProjectionManager manager =
-                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-        startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE);
+    private void chooseVideo() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        startActivityForResult(intent, REQUEST_VIDEO);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_OVERLAY) {
-            if (Settings.canDrawOverlays(this)) {
-                startOverlayService();
-                if (analysisStatus != null) {
-                    analysisStatus.setText("مجوز پنل فعال شد؛ دوباره دکمهٔ شروع تشخیص را بزن.");
+
+        if (requestCode == REQUEST_VIDEO) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                selectedVideo = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            selectedVideo, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Exception ignored) {
+                    // Some document providers do not offer persistable grants.
                 }
+                analyzeButton.setEnabled(!analyzing);
+                videoStatus.setText("ویدئوی انتخاب‌شده: " + getDisplayName(selectedVideo));
+                videoResult.setText("");
+                videoProgress.setProgress(0);
             }
-            refreshStatus();
             return;
         }
 
-        if (requestCode == REQUEST_CAPTURE) {
-            if (resultCode == RESULT_OK && data != null) {
-                Intent service = new Intent(this, ScreenAnalysisService.class);
-                service.putExtra(EXTRA_RESULT, resultCode);
-                service.putExtra(EXTRA_DATA, data);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(service);
-                } else {
-                    startService(service);
+        if (requestCode == REQUEST_OVERLAY) {
+            if (Settings.canDrawOverlays(this)) {
+                startOverlayService();
+                if (overlayStatus != null) {
+                    overlayStatus.setText("مجوز فعال شد؛ پنل شناور آماده است.");
                 }
-                if (analysisStatus != null) {
-                    analysisStatus.setText("اجازه صادر شد؛ مدل روی تصویر زنده اجرا می‌شود.");
-                }
-            } else if (analysisStatus != null) {
-                analysisStatus.setText("اجازهٔ ضبط صفحه داده نشد؛ تشخیص شروع نشد.");
             }
+            refreshStatus();
         }
+    }
+
+    private String getDisplayName(Uri uri) {
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(
+                    uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) return cursor.getString(index);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return "ویدئوی انتخاب‌شده";
+    }
+
+    private void startVideoAnalysis() {
+        if (selectedVideo == null || analyzing) return;
+
+        analyzing = true;
+        analyzeButton.setEnabled(false);
+        videoProgress.setProgress(0);
+        videoResult.setText("");
+        videoStatus.setText("در حال آماده‌سازی تحلیل محلی...");
+        final Uri uri = selectedVideo;
+
+        analysisExecutor.execute(() -> {
+            try {
+                VideoAnalysisTask.Report report = VideoAnalysisTask.analyze(
+                        getApplicationContext(), uri,
+                        (processed, total, timestampMs, peopleCount) -> runOnUiThread(() -> {
+                            int percent = total <= 0 ? 0 : (processed * 100 / total);
+                            videoProgress.setProgress(percent);
+                            videoStatus.setText("تحلیل آفلاین: " + percent + "% | فریم " +
+                                    processed + " از " + total);
+                        }));
+
+                runOnUiThread(() -> {
+                    videoProgress.setProgress(100);
+                    videoStatus.setText("تحلیل کامل شد: " + getDisplayName(uri));
+                    videoResult.setText(report.toDisplayText());
+                    analyzing = false;
+                    analyzeButton.setEnabled(selectedVideo != null);
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    videoStatus.setText("تحلیل انجام نشد.");
+                    videoResult.setText("خطا: " +
+                            (error.getMessage() == null ? "فایل یا مدل قابل‌خواندن نیست." : error.getMessage()));
+                    analyzing = false;
+                    analyzeButton.setEnabled(selectedVideo != null);
+                });
+            }
+        });
     }
 
     private void enableOverlay() {
@@ -151,7 +217,7 @@ public class MainActivity extends Activity {
 
     private void startOverlayService() {
         Intent service = new Intent(this, OverlayService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             startForegroundService(service);
         } else {
             startService(service);
@@ -162,16 +228,7 @@ public class MainActivity extends Activity {
         if (overlayStatus != null) {
             overlayStatus.setText(Settings.canDrawOverlays(this)
                     ? "مجوز نمایش روی برنامه‌های دیگر فعال است."
-                    : "برای پنل و کادرهای زنده، مجوز نمایش روی برنامه‌های دیگر لازم است.");
-        }
-        if (analysisStatus != null) {
-            if (ScreenMotionState.active) {
-                int count = ScreenMotionState.detectedPlayers == null
-                        ? 0 : ScreenMotionState.detectedPlayers.length;
-                analysisStatus.setText("تشخیص فعال | کاندیدای شخص/بازیکن: " + count);
-            } else {
-                analysisStatus.setText("تشخیص زنده خاموش است.");
-            }
+                    : "برای نمایش پنل شناور، مجوز نمایش روی برنامه‌های دیگر لازم است.");
         }
     }
 
@@ -189,7 +246,8 @@ public class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = progress + 1;
                 updateSliderLabel(label, caption, value);
-                if (fromUser) getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(key, value).apply();
+                if (fromUser) getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .edit().putInt(key, value).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -217,7 +275,7 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    private void addTop(LinearLayout root, android.view.View view, int marginDp) {
+    private void addTop(LinearLayout root, View view, int marginDp) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         p.topMargin = dp(marginDp);
@@ -226,5 +284,11 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    @Override
+    protected void onDestroy() {
+        analysisExecutor.shutdownNow();
+        super.onDestroy();
     }
 }
