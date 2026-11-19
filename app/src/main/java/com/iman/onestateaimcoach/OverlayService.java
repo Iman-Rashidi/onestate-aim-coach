@@ -163,6 +163,7 @@ public class OverlayService extends Service
         params.x = dp(16);
         params.y = dp(100);
         windowManager.addView(panel, params);
+        setCollapsed(true); // Start as a compact circle so the game view stays clear.
 
         updateValues();
         mainHandler.post(metricsUpdater);
