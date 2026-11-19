@@ -20,9 +20,12 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -31,19 +34,31 @@ import java.util.Locale;
 public class OverlayService extends Service implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final String CHANNEL_ID = "aim_coach_overlay";
     private static final String PREFS = "coach_settings";
+    private static final int BUBBLE_SIZE_DP = 56;
+
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
     private WindowManager.LayoutParams drawingParams;
-    private LinearLayout panel;
+    private FrameLayout panel;
+    private LinearLayout expandedPanel;
+    private TextView bubble;
+    private GradientDrawable bubbleBackground;
     private LinearLayout details;
     private TextView cameraValue;
     private TextView aimValue;
     private TextView recoilValue;
     private TextView motionValue;
     private DetectionDrawingView detectionView;
-    private boolean collapsed = false;
+    private boolean collapsed = true;
+
     private float downRawX, downRawY;
     private int downX, downY;
+    private float bubbleDownRawX, bubbleDownRawY;
+    private int bubbleDownX, bubbleDownY;
+    private boolean bubbleDragging;
+    private boolean bubbleMoved;
+    private Runnable longPressRunnable;
+
     private SharedPreferences preferences;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable metricsUpdater = new Runnable() {
@@ -80,7 +95,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         Notification notification = builder
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentTitle("OneState Aim Coach فعال است")
-                .setContentText("پنل تنظیمات و بازخورد تصویری آماده است")
+                .setContentText("پنل شناور کوچک و بازخورد تصویری آماده است")
                 .setContentIntent(pending)
                 .setOngoing(true)
                 .build();
@@ -111,14 +126,18 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             }
         }
 
-        panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(12), dp(9), dp(12), dp(10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(232, 21, 31, 45));
-        bg.setCornerRadius(dp(14));
-        bg.setStroke(dp(1), Color.rgb(83, 111, 139));
-        panel.setBackground(bg);
+        panel = new FrameLayout(this);
+        panel.setClipChildren(false);
+        panel.setClipToPadding(false);
+
+        expandedPanel = new LinearLayout(this);
+        expandedPanel.setOrientation(LinearLayout.VERTICAL);
+        expandedPanel.setPadding(dp(12), dp(9), dp(12), dp(10));
+        GradientDrawable expandedBackground = new GradientDrawable();
+        expandedBackground.setColor(Color.argb(232, 21, 31, 45));
+        expandedBackground.setCornerRadius(dp(14));
+        expandedBackground.setStroke(dp(1), Color.rgb(83, 111, 139));
+        expandedPanel.setBackground(expandedBackground);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -128,7 +147,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         header.addView(collapse);
         TextView close = action("×");
         header.addView(close);
-        panel.addView(header);
+        expandedPanel.addView(header);
 
         details = new LinearLayout(this);
         details.setOrientation(LinearLayout.VERTICAL);
@@ -142,35 +161,40 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
         mp.topMargin = dp(6);
         details.addView(motionValue, mp);
-        TextView hint = label("کادرها: بازیکن/شخص احتمالی، نه تشخیص قطعی دشمن", 10, Color.LTGRAY, false);
+        TextView hint = label("کادرها: شخص/بازیکن احتمالی، نه تشخیص قطعی دشمن", 10, Color.LTGRAY, false);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
-        panel.addView(details);
+        expandedPanel.addView(details);
 
-        collapse.setOnClickListener(v -> {
-            collapsed = !collapsed;
-            details.setVisibility(collapsed ? View.GONE : View.VISIBLE);
-            collapse.setText(collapsed ? "+" : "−");
-        });
+        collapse.setOnClickListener(v -> setCompact(true));
         close.setOnClickListener(v -> stopSelf());
-        header.setOnTouchListener((view, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    downRawX = event.getRawX();
-                    downRawY = event.getRawY();
-                    downX = params.x;
-                    downY = params.y;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    params.x = downX + Math.round(event.getRawX() - downRawX);
-                    params.y = downY + Math.round(event.getRawY() - downRawY);
-                    try { windowManager.updateViewLayout(panel, params); } catch (Exception ignored) {}
-                    return true;
-                default:
-                    return false;
-            }
-        });
+        header.setOnTouchListener((view, event) -> handleHeaderDrag(event));
+
+        FrameLayout.LayoutParams expandedLp = new FrameLayout.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        panel.addView(expandedPanel, expandedLp);
+
+        bubble = new TextView(this);
+        bubble.setText("⊕");
+        bubble.setTextSize(27);
+        bubble.setTextColor(Color.rgb(100, 190, 255));
+        bubble.setGravity(Gravity.CENTER);
+        bubble.setIncludeFontPadding(false);
+        bubble.setContentDescription("پنل شناور Aim Coach؛ لمس برای بازکردن، نگه‌داشتن برای جابه‌جایی");
+        bubble.setClickable(true);
+        bubble.setFocusable(true);
+        bubbleBackground = new GradientDrawable();
+        bubbleBackground.setShape(GradientDrawable.OVAL);
+        bubbleBackground.setColor(Color.argb(238, 17, 27, 42));
+        bubbleBackground.setStroke(dp(2), Color.rgb(53, 169, 255));
+        bubble.setBackground(bubbleBackground);
+        FrameLayout.LayoutParams bubbleLp = new FrameLayout.LayoutParams(
+                dp(BUBBLE_SIZE_DP), dp(BUBBLE_SIZE_DP), Gravity.TOP | Gravity.START);
+        panel.addView(bubble, bubbleLp);
+        bubble.setOnTouchListener((view, event) -> handleBubbleTouch(view, event));
 
         params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -182,8 +206,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = dp(16);
-        params.y = dp(100);
+        params.x = Math.max(0, preferences.getInt("overlay_x", dp(16)));
+        params.y = Math.max(0, preferences.getInt("overlay_y", dp(100)));
+        expandedPanel.setVisibility(View.GONE);
+        bubble.setVisibility(View.VISIBLE);
+        collapsed = true;
         windowManager.addView(panel, params);
 
         detectionView = new DetectionDrawingView();
@@ -205,6 +232,131 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         mainHandler.post(metricsUpdater);
     }
 
+    private boolean handleBubbleTouch(View view, MotionEvent event) {
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                bubbleDragging = false;
+                bubbleMoved = false;
+                bubbleDownRawX = event.getRawX();
+                bubbleDownRawY = event.getRawY();
+                bubbleDownX = params.x;
+                bubbleDownY = params.y;
+                longPressRunnable = () -> {
+                    bubbleDragging = true;
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                };
+                mainHandler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout());
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                float dx = event.getRawX() - bubbleDownRawX;
+                float dy = event.getRawY() - bubbleDownRawY;
+                int touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
+                if (!bubbleDragging && (Math.abs(dx) > touchSlop || Math.abs(dy) > touchSlop)) {
+                    bubbleMoved = true;
+                    if (longPressRunnable != null) mainHandler.removeCallbacks(longPressRunnable);
+                }
+                if (bubbleDragging) {
+                    params.x = clamp(bubbleDownX + Math.round(dx), 0,
+                            screenWidth() - dp(BUBBLE_SIZE_DP));
+                    params.y = clamp(bubbleDownY + Math.round(dy), 0,
+                            screenHeight() - dp(BUBBLE_SIZE_DP));
+                    updatePanelPosition();
+                }
+                return true;
+
+            case MotionEvent.ACTION_UP:
+                cancelLongPress();
+                if (!bubbleDragging && !bubbleMoved) {
+                    setCompact(false);
+                } else if (bubbleDragging) {
+                    savePanelPosition();
+                }
+                bubbleDragging = false;
+                return true;
+
+            case MotionEvent.ACTION_CANCEL:
+                cancelLongPress();
+                bubbleDragging = false;
+                return true;
+
+            default:
+                return true;
+        }
+    }
+
+    private boolean handleHeaderDrag(MotionEvent event) {
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                downRawX = event.getRawX();
+                downRawY = event.getRawY();
+                downX = params.x;
+                downY = params.y;
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                params.x = clamp(downX + Math.round(event.getRawX() - downRawX), 0,
+                        screenWidth() - dp(80));
+                params.y = clamp(downY + Math.round(event.getRawY() - downRawY), 0,
+                        screenHeight() - dp(80));
+                updatePanelPosition();
+                return true;
+            case MotionEvent.ACTION_UP:
+                savePanelPosition();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void setCompact(boolean compact) {
+        collapsed = compact;
+        if (expandedPanel != null) expandedPanel.setVisibility(compact ? View.GONE : View.VISIBLE);
+        if (bubble != null) bubble.setVisibility(compact ? View.VISIBLE : View.GONE);
+        updatePanelPosition();
+        if (!compact && panel != null) {
+            panel.post(() -> {
+                if (params == null || panel == null || collapsed) return;
+                int maxX = Math.max(0, screenWidth() - panel.getWidth());
+                params.x = Math.min(params.x, maxX);
+                updatePanelPosition();
+            });
+        }
+    }
+
+    private void updatePanelPosition() {
+        if (windowManager != null && panel != null && params != null) {
+            try { windowManager.updateViewLayout(panel, params); } catch (Exception ignored) {}
+        }
+    }
+
+    private void savePanelPosition() {
+        if (preferences != null && params != null) {
+            preferences.edit()
+                    .putInt("overlay_x", params.x)
+                    .putInt("overlay_y", params.y)
+                    .apply();
+        }
+    }
+
+    private void cancelLongPress() {
+        if (longPressRunnable != null) {
+            mainHandler.removeCallbacks(longPressRunnable);
+            longPressRunnable = null;
+        }
+    }
+
+    private int screenWidth() {
+        return getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int screenHeight() {
+        return getResources().getDisplayMetrics().heightPixels;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.max(0, Math.min(value, Math.max(min, max))));
+    }
+
     private void updateValues() {
         if (preferences == null || cameraValue == null) return;
         cameraValue.setText("دوربین: " + preferences.getInt("camera_sensitivity", 50) + "/100");
@@ -220,6 +372,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             } else {
                 motionValue.setText("تحلیل زنده: خاموش");
             }
+        }
+        if (bubbleBackground != null) {
+            bubbleBackground.setStroke(dp(2), ScreenMotionState.active
+                    ? Color.rgb(74, 210, 145) : Color.rgb(53, 169, 255));
+            if (bubble != null) bubble.invalidate();
         }
         if (detectionView != null) detectionView.invalidate();
     }
@@ -301,6 +458,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     @Override
     public void onDestroy() {
+        cancelLongPress();
         mainHandler.removeCallbacks(metricsUpdater);
         if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(this);
         if (windowManager != null && detectionView != null) {
@@ -310,6 +468,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             try { windowManager.removeView(panel); } catch (Exception ignored) {}
         }
         detectionView = null;
+        bubble = null;
+        expandedPanel = null;
         panel = null;
         stopForeground(true);
         super.onDestroy();
