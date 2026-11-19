@@ -8,11 +8,8 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
@@ -26,30 +23,35 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import java.util.Locale;
-
-public class OverlayService extends Service implements SharedPreferences.OnSharedPreferenceChangeListener {
+public class OverlayService extends Service
+        implements SharedPreferences.OnSharedPreferenceChangeListener {
     private static final String CHANNEL_ID = "aim_coach_overlay";
     private static final String PREFS = "coach_settings";
+    private static final int BUBBLE_SIZE_DP = 46;
+
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
-    private WindowManager.LayoutParams drawingParams;
     private LinearLayout panel;
+    private LinearLayout header;
     private LinearLayout details;
+    private TextView title;
+    private TextView collapse;
+    private TextView close;
     private TextView cameraValue;
     private TextView aimValue;
     private TextView recoilValue;
-    private TextView motionValue;
-    private DetectionDrawingView detectionView;
     private boolean collapsed = false;
-    private float downRawX, downRawY;
-    private int downX, downY;
+    private float downRawX;
+    private float downRawY;
+    private int downX;
+    private int downY;
+    private boolean dragging = false;
     private SharedPreferences preferences;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable metricsUpdater = new Runnable() {
         @Override public void run() {
             updateValues();
-            if (panel != null) mainHandler.postDelayed(this, 350);
+            if (panel != null) mainHandler.postDelayed(this, 700);
         }
     };
 
@@ -80,7 +82,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         Notification notification = builder
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentTitle("OneState Aim Coach فعال است")
-                .setContentText("پنل تنظیمات و بازخورد تصویری آماده است")
+                .setContentText("پنل کوچک تنظیمات آماده است")
                 .setContentIntent(pending)
                 .setOngoing(true)
                 .build();
@@ -103,75 +105,51 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private void createPanel() {
         if (panel != null) return;
+        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         if (windowManager == null) {
-            windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-            if (windowManager == null) {
-                stopSelf();
-                return;
-            }
+            stopSelf();
+            return;
         }
 
         panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(9), dp(12), dp(10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(232, 21, 31, 45));
-        bg.setCornerRadius(dp(14));
-        bg.setStroke(dp(1), Color.rgb(83, 111, 139));
-        panel.setBackground(bg);
+        panel.setBackground(panelBackground(false));
 
-        LinearLayout header = new LinearLayout(this);
+        header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = label("AIM COACH", 13, Color.WHITE, true);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1));
-        TextView collapse = action("−");
-        header.addView(collapse);
-        TextView close = action("×");
-        header.addView(close);
+
+        title = label("AIM COACH", 13, Color.WHITE, true);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1f));
+
+        collapse = action("−");
+        header.addView(collapse, new LinearLayout.LayoutParams(dp(34), dp(34)));
+
+        close = action("×");
+        header.addView(close, new LinearLayout.LayoutParams(dp(34), dp(34)));
         panel.addView(header);
 
         details = new LinearLayout(this);
         details.setOrientation(LinearLayout.VERTICAL);
+
         cameraValue = label("", 12, Color.WHITE, false);
         aimValue = label("", 12, Color.WHITE, false);
         recoilValue = label("", 12, Color.WHITE, false);
-        motionValue = label("", 12, Color.rgb(132, 225, 178), true);
         details.addView(cameraValue);
         details.addView(aimValue);
         details.addView(recoilValue);
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
-        mp.topMargin = dp(6);
-        details.addView(motionValue, mp);
-        TextView hint = label("کادرها: بازیکن/شخص احتمالی، نه تشخیص قطعی دشمن", 10, Color.LTGRAY, false);
-        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
-        hp.topMargin = dp(5);
-        details.addView(hint, hp);
+
+        TextView hint = label("تنظیمات مرجع؛ بدون کنترل ورودی بازی", 10,
+                Color.LTGRAY, false);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-2, -2);
+        hintParams.topMargin = dp(5);
+        details.addView(hint, hintParams);
         panel.addView(details);
 
-        collapse.setOnClickListener(v -> {
-            collapsed = !collapsed;
-            details.setVisibility(collapsed ? View.GONE : View.VISIBLE);
-            collapse.setText(collapsed ? "+" : "−");
-        });
+        collapse.setOnClickListener(v -> setCollapsed(true));
         close.setOnClickListener(v -> stopSelf());
-        header.setOnTouchListener((view, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    downRawX = event.getRawX();
-                    downRawY = event.getRawY();
-                    downX = params.x;
-                    downY = params.y;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    params.x = downX + Math.round(event.getRawX() - downRawX);
-                    params.y = downY + Math.round(event.getRawY() - downRawY);
-                    try { windowManager.updateViewLayout(panel, params); } catch (Exception ignored) {}
-                    return true;
-                default:
-                    return false;
-            }
-        });
-
+        attachDrag(title, false);
+        
         params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -185,93 +163,110 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         params.x = dp(16);
         params.y = dp(100);
         windowManager.addView(panel, params);
-
-        detectionView = new DetectionDrawingView();
-        drawingParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Build.VERSION.SDK_INT >= 26
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT);
-        drawingParams.gravity = Gravity.TOP | Gravity.START;
-        windowManager.addView(detectionView, drawingParams);
+        setCollapsed(true); // Start as a compact circle so the game view stays clear.
 
         updateValues();
         mainHandler.post(metricsUpdater);
     }
 
-    private void updateValues() {
-        if (preferences == null || cameraValue == null) return;
-        cameraValue.setText("دوربین: " + preferences.getInt("camera_sensitivity", 50) + "/100");
-        aimValue.setText("نشانه: " + preferences.getInt("aim_sensitivity", 50) + "/100");
-        recoilValue.setText("کنترل لگد: " + preferences.getInt("recoil_reminder", 50) + "/100");
-        if (motionValue != null) {
-            if (ScreenMotionState.active) {
-                ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
-                int count = boxes == null ? 0 : boxes.length;
-                motionValue.setText("تغییر تصویر: " +
-                        String.format(Locale.US, "%.1f", ScreenMotionState.motionScore) +
-                        " | کاندیداها: " + count);
-            } else {
-                motionValue.setText("تحلیل زنده: خاموش");
-            }
-        }
-        if (detectionView != null) detectionView.invalidate();
+    private GradientDrawable panelBackground(boolean circle) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.argb(226, 21, 31, 45));
+        bg.setCornerRadius(circle ? dp(BUBBLE_SIZE_DP) : dp(14));
+        if (circle) bg.setShape(GradientDrawable.OVAL);
+        bg.setStroke(dp(1), Color.rgb(83, 111, 139));
+        return bg;
     }
 
-    private final class DetectionDrawingView extends View {
-        private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private void setCollapsed(boolean value) {
+        if (panel == null || params == null || collapsed == value) return;
+        collapsed = value;
 
-        DetectionDrawingView() {
-            super(OverlayService.this);
-            boxPaint.setColor(Color.rgb(255, 70, 70));
-            boxPaint.setStyle(Paint.Style.STROKE);
-            boxPaint.setStrokeWidth(dp(2));
-            labelPaint.setColor(Color.WHITE);
-            labelPaint.setTextSize(dp(11));
-            labelPaint.setTypeface(android.graphics.Typeface.create(
-                    "sans-serif-medium", android.graphics.Typeface.BOLD));
-            labelBackground.setColor(Color.argb(220, 145, 28, 28));
-            setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        if (collapsed) {
+            details.setVisibility(View.GONE);
+            title.setVisibility(View.GONE);
+            close.setVisibility(View.GONE);
+            collapse.setText("A");
+            collapse.setTextSize(16);
+            collapse.setPadding(0, 0, 0, 0);
+            collapse.setBackgroundColor(Color.TRANSPARENT);
+            LinearLayout.LayoutParams bubbleParams =
+                    new LinearLayout.LayoutParams(dp(BUBBLE_SIZE_DP), dp(BUBBLE_SIZE_DP));
+            collapse.setLayoutParams(bubbleParams);
+            collapse.setOnClickListener(null);
+            attachDrag(collapse, true);
+
+            panel.setPadding(0, 0, 0, 0);
+            panel.setBackground(panelBackground(true));
+            header.setGravity(Gravity.CENTER);
+            header.setLayoutParams(new LinearLayout.LayoutParams(
+                    dp(BUBBLE_SIZE_DP), dp(BUBBLE_SIZE_DP)));
+            params.width = dp(BUBBLE_SIZE_DP);
+            params.height = dp(BUBBLE_SIZE_DP);
+        } else {
+            details.setVisibility(View.VISIBLE);
+            title.setVisibility(View.VISIBLE);
+            close.setVisibility(View.VISIBLE);
+            collapse.setText("−");
+            collapse.setTextSize(19);
+            collapse.setPadding(dp(8), 0, dp(8), 0);
+            collapse.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+            collapse.setOnTouchListener(null);
+            collapse.setOnClickListener(v -> setCollapsed(true));
+            attachDrag(title, false);
+
+            panel.setPadding(dp(12), dp(9), dp(12), dp(10));
+            panel.setBackground(panelBackground(false));
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroupLayout.MATCH_PARENT, dp(34)));
+            params.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
-            if (boxes == null) return;
-            float canvasWidth = getWidth();
-            float canvasHeight = getHeight();
+        try { windowManager.updateViewLayout(panel, params); } catch (Exception ignored) {}
+    }
 
-            for (ScreenMotionState.PlayerBox box : boxes) {
-                RectF rect = new RectF(
-                        box.left * canvasWidth,
-                        box.top * canvasHeight,
-                        box.right * canvasWidth,
-                        box.bottom * canvasHeight);
-                if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
-                canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
-
-                String caption = String.format(Locale.US, "PLAYER? %d%%",
-                        Math.round(box.confidence * 100f));
-                float textWidth = labelPaint.measureText(caption);
-                float labelTop = Math.max(dp(20), rect.top - dp(4));
-                RectF bg = new RectF(
-                        rect.left,
-                        labelTop - dp(18),
-                        rect.left + textWidth + dp(10),
-                        labelTop);
-                canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
-                canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
+    private void attachDrag(View handle, boolean tapToExpand) {
+        handle.setOnTouchListener((view, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    downRawX = event.getRawX();
+                    downRawY = event.getRawY();
+                    downX = params.x;
+                    downY = params.y;
+                    dragging = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - downRawX;
+                    float dy = event.getRawY() - downRawY;
+                    if (Math.abs(dx) > dp(3) || Math.abs(dy) > dp(3)) dragging = true;
+                    if (dragging) {
+                        params.x = downX + Math.round(dx);
+                        params.y = downY + Math.round(dy);
+                        try { windowManager.updateViewLayout(panel, params); }
+                        catch (Exception ignored) {}
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!dragging && tapToExpand) setCollapsed(false);
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    return true;
+                default:
+                    return false;
             }
-        }
+        });
+    }
+
+    private void updateValues() {
+        if (preferences == null || cameraValue == null) return;
+        cameraValue.setText("دوربین: " +
+                preferences.getInt("camera_sensitivity", 50) + "/100");
+        aimValue.setText("نشانه: " +
+                preferences.getInt("aim_sensitivity", 50) + "/100");
+        recoilValue.setText("کنترل لگد: " +
+                preferences.getInt("recoil_reminder", 50) + "/100");
     }
 
     @Override
@@ -280,19 +275,19 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     }
 
     private TextView label(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(size);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(null, android.graphics.Typeface.BOLD);
-        return t;
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextSize(size);
+        text.setTextColor(color);
+        if (bold) text.setTypeface(null, android.graphics.Typeface.BOLD);
+        return text;
     }
 
     private TextView action(String value) {
-        TextView t = label(value, 19, Color.WHITE, true);
-        t.setGravity(Gravity.CENTER);
-        t.setPadding(dp(10), 0, dp(10), 0);
-        return t;
+        TextView text = label(value, 19, Color.WHITE, true);
+        text.setGravity(Gravity.CENTER);
+        text.setPadding(dp(8), 0, dp(8), 0);
+        return text;
     }
 
     private int dp(int value) {
@@ -303,13 +298,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     public void onDestroy() {
         mainHandler.removeCallbacks(metricsUpdater);
         if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(this);
-        if (windowManager != null && detectionView != null) {
-            try { windowManager.removeView(detectionView); } catch (Exception ignored) {}
-        }
         if (windowManager != null && panel != null) {
             try { windowManager.removeView(panel); } catch (Exception ignored) {}
         }
-        detectionView = null;
         panel = null;
         stopForeground(true);
         super.onDestroy();
@@ -317,4 +308,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     @Override
     public IBinder onBind(Intent intent) { return null; }
+
+    private static final class ViewGroupLayout {
+        static final int MATCH_PARENT = -1;
+    }
 }
