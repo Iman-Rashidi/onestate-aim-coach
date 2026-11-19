@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
@@ -22,13 +23,13 @@ import android.util.DisplayMetrics;
 import android.view.WindowManager;
 
 import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.support.label.Category;
 import org.tensorflow.lite.task.vision.detector.Detection;
 import org.tensorflow.lite.task.vision.detector.ObjectDetector;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 public class ScreenAnalysisService extends Service {
     private static final String CHANNEL_ID = "aim_coach_analysis";
@@ -90,7 +91,7 @@ public class ScreenAnalysisService extends Service {
             startCapture();
             ScreenMotionState.active = true;
             ScreenMotionState.level = objectDetector == null
-                    ? "تحلیل حرکت، مدل بازیکن در دسترس نیست"
+                    ? "تحلیل حرکت؛ مدل بازیکن در دسترس نیست"
                     : "تحلیل زنده فعال";
         } catch (Exception exception) {
             ScreenMotionState.active = false;
@@ -170,17 +171,15 @@ public class ScreenAnalysisService extends Service {
                 bitmap = imageToBitmap(buffer, rowStride, pixelStride, width, height);
                 List<Detection> results = objectDetector.detect(TensorImage.fromBitmap(bitmap));
                 List<ScreenMotionState.PlayerBox> boxes = new ArrayList<>();
+
                 for (Detection detection : results) {
-                    if (detection.getCategories() == null) continue;
-                    boolean person = false;
                     float confidence = 0f;
-                    for (org.tensorflow.lite.task.vision.detector.Category category : detection.getCategories()) {
+                    for (Category category : detection.getCategories()) {
                         if ("person".equalsIgnoreCase(category.getLabel())) {
-                            person = true;
                             confidence = Math.max(confidence, category.getScore());
                         }
                     }
-                    if (!person || confidence < PERSON_SCORE_THRESHOLD) continue;
+                    if (confidence < PERSON_SCORE_THRESHOLD) continue;
 
                     android.graphics.RectF rect = detection.getBoundingBox();
                     boxes.add(new ScreenMotionState.PlayerBox(
@@ -190,6 +189,7 @@ public class ScreenAnalysisService extends Service {
                             rect.bottom / (float) height,
                             confidence));
                 }
+
                 ScreenMotionState.detectedPlayers =
                         boxes.toArray(new ScreenMotionState.PlayerBox[0]);
                 ScreenMotionState.level = boxes.size() == 0
@@ -305,13 +305,13 @@ public class ScreenAnalysisService extends Service {
         if (projection != null) {
             try { projection.stop(); } catch (Exception ignored) {}
         }
-        if (workerThread != null) {
-            workerThread.quitSafely();
-            workerThread = null;
-        }
         if (objectDetector != null) {
             try { objectDetector.close(); } catch (Exception ignored) {}
             objectDetector = null;
+        }
+        if (workerThread != null) {
+            workerThread.quitSafely();
+            workerThread = null;
         }
         stopForeground(true);
         super.onDestroy();
