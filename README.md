@@ -4,7 +4,10 @@ An Android companion intended to run alongside OneState during online play. It u
 
 ## Features
 
-- Movable, collapsible floating panel.
+- Compact floating control that starts as a 56dp circular bubble to minimize obstruction during gameplay.
+- Tap the bubble to expand the settings panel; use the minimize control to return to the bubble.
+- Long-press the bubble to drag it; its position is saved for the next start.
+- The bubble outline changes color while live screen analysis is active.
 - Camera and aim sensitivity reference sliders.
 - Recoil-control reminder setting.
 - Live screen capture with explicit Android consent.
