@@ -1,27 +1,28 @@
-# OneState Aim Coach 0.3
+# OneState Aim Coach 0.4
 
-An Android companion intended to run alongside OneState during online play. It uses Android MediaProjection after explicit user consent to analyze visible screen pixels locally, and draws non-interactive candidate boxes in a floating overlay.
+An Android companion for personal sensitivity references, recoil reminders, offline review of recorded OneState videos, and a compact floating settings bubble.
 
 ## Features
 
-- Movable, collapsible floating panel.
 - Camera and aim sensitivity reference sliders.
 - Recoil-control reminder setting.
-- Live screen capture with explicit Android consent.
-- On-device EfficientDet Lite0 object detection for visible `person` candidates.
-- Floating bounding boxes and confidence values for person-like detections.
-- Screen-motion metric from a small center patch.
-- No root access, game-memory access, packet inspection, input injection, aim movement, or automatic firing.
-- Raw frames are processed in memory and are not saved or uploaded by the app.
+- A draggable floating settings panel that collapses into a 46 dp circular bubble.
+- Offline video selection through Android's document picker.
+- Local frame sampling from recorded video.
+- Nine overlapping image crops per sampled frame to give small, distant people more pixels for a general-purpose detector.
+- Non-maximum suppression to merge duplicate detections from overlapping crops.
+- A local textual summary with sampled timestamps and estimated person counts.
+- No live screen capture, live player boxes, game-memory access, packet inspection, input injection, aim movement, or automatic firing.
+- Selected video is read locally by the app; raw frames are not uploaded by this code.
 
 ## Detection limitations
 
-The bundled detector is a general COCO model, not a model trained on OneState screenshots. It may miss game characters or mark teammates, NPCs, posters, or other person-like objects. It does **not** reliably distinguish enemies from teammates. A reliable OneState-specific enemy classifier requires a representative, labelled dataset and evaluation on real game frames.
+The bundled EfficientDet Lite0 model is a general COCO detector, not a model trained on OneState. Tiled crops can improve the detector's chance of finding small people in recorded frames, but cannot guarantee detection at very long distances. Game avatars, visual effects, posters, and stylized characters may be missed or misclassified. Counts are estimates from sampled frames, not a definitive player count.
 
 ## Build
 
-Java 17, Android Gradle Plugin 8.7.3, Gradle 8.9, compile SDK 35. GitHub Actions downloads the EfficientDet Lite0 model and builds a debug APK on pushes to `main` and pull requests targeting `main`.
+Java 17, Android Gradle Plugin 8.7.3, Gradle 8.9, compile SDK 35. GitHub Actions downloads the EfficientDet Lite0 model and builds a debug APK.
 
 ## Device validation
 
-Samsung Galaxy S23 Ultra is the intended first test device. No compatibility or performance claim is made until the APK is installed and tested on that phone. MediaProjection and overlay behavior must be checked on-device. High-resolution screen capture and inference may affect battery use, heat, and game frame rate.
+Samsung Galaxy S23 Ultra is the intended test device. Runtime speed and detection quality must be measured on actual recordings; video duration, resolution, heat, and battery use affect processing time.
