@@ -6,6 +6,8 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
@@ -18,24 +20,35 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
-import android.view.Display;
 import android.view.WindowManager;
 
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.support.label.Category;
+import org.tensorflow.lite.task.vision.detector.Detection;
+import org.tensorflow.lite.task.vision.detector.ObjectDetector;
+
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 public class ScreenAnalysisService extends Service {
     private static final String CHANNEL_ID = "aim_coach_analysis";
     private static final int NOTIFICATION_ID = 2;
     private static final String EXTRA_RESULT = "projection_result";
     private static final String EXTRA_DATA = "projection_data";
+    private static final long MIN_FRAME_INTERVAL_MS = 110;
+    private static final long MIN_DETECTION_INTERVAL_MS = 350;
+    private static final float PERSON_SCORE_THRESHOLD = 0.38f;
 
     private HandlerThread workerThread;
     private Handler worker;
     private MediaProjection projection;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
+    private ObjectDetector objectDetector;
     private byte[] previous;
     private long lastFrameAt;
+    private long lastDetectionAt;
     private float smoothedScore;
 
     @Override
@@ -63,7 +76,7 @@ public class ScreenAnalysisService extends Service {
                 return START_NOT_STICKY;
             }
 
-            workerThread = new HandlerThread("AimCoachScreenAnalysis");
+            workerThread = new HandlerThread("AimCoachVision");
             workerThread.start();
             worker = new Handler(workerThread.getLooper());
 
@@ -74,22 +87,39 @@ public class ScreenAnalysisService extends Service {
                 }
             }, worker);
 
+            loadDetector();
             startCapture();
             ScreenMotionState.active = true;
-            ScreenMotionState.level = "در حال تحلیل";
+            ScreenMotionState.level = objectDetector == null
+                    ? "تحلیل حرکت؛ مدل بازیکن در دسترس نیست"
+                    : "تحلیل زنده فعال";
         } catch (Exception exception) {
             ScreenMotionState.active = false;
-            ScreenMotionState.level = "خطا در شروع";
+            ScreenMotionState.level = "خطا در شروع تحلیل";
             stopSelf();
         }
         return START_NOT_STICKY;
     }
 
+    private void loadDetector() {
+        try {
+            ObjectDetector.ObjectDetectorOptions options =
+                    ObjectDetector.ObjectDetectorOptions.builder()
+                            .setMaxResults(12)
+                            .setScoreThreshold(PERSON_SCORE_THRESHOLD)
+                            .build();
+            objectDetector = ObjectDetector.createFromFileAndOptions(
+                    getApplicationContext(), "efficientdet-lite0.tflite", options);
+        } catch (Exception error) {
+            objectDetector = null;
+            ScreenMotionState.level = "مدل تشخیص بازیکن بارگذاری نشد";
+        }
+    }
+
     private void startCapture() {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        Display display = wm.getDefaultDisplay();
         DisplayMetrics metrics = new DisplayMetrics();
-        display.getRealMetrics(metrics);
+        wm.getDefaultDisplay().getRealMetrics(metrics);
 
         int width = Math.max(320, metrics.widthPixels / 2);
         int height = Math.max(320, metrics.heightPixels / 2);
@@ -101,7 +131,7 @@ public class ScreenAnalysisService extends Service {
                 image = reader.acquireLatestImage();
                 if (image != null) analyze(image);
             } catch (Exception ignored) {
-                // A dropped frame must not interrupt the game or the service.
+                // A dropped or malformed frame must not interrupt the game.
             } finally {
                 if (image != null) image.close();
             }
@@ -120,7 +150,7 @@ public class ScreenAnalysisService extends Service {
 
     private void analyze(Image image) {
         long now = System.currentTimeMillis();
-        if (now - lastFrameAt < 90) return; // Limit processing to about 11 frames/second.
+        if (now - lastFrameAt < MIN_FRAME_INTERVAL_MS) return;
         lastFrameAt = now;
 
         Image.Plane[] planes = image.getPlanes();
@@ -132,7 +162,49 @@ public class ScreenAnalysisService extends Service {
         int width = image.getWidth();
         int height = image.getHeight();
 
-        // Measure only a central patch around the screen center. No opponent detection.
+        updateMotionMetric(buffer, rowStride, pixelStride, width, height);
+
+        if (objectDetector != null && now - lastDetectionAt >= MIN_DETECTION_INTERVAL_MS) {
+            lastDetectionAt = now;
+            Bitmap bitmap = null;
+            try {
+                bitmap = imageToBitmap(buffer, rowStride, pixelStride, width, height);
+                List<Detection> results = objectDetector.detect(TensorImage.fromBitmap(bitmap));
+                List<ScreenMotionState.PlayerBox> boxes = new ArrayList<>();
+
+                for (Detection detection : results) {
+                    float confidence = 0f;
+                    for (Category category : detection.getCategories()) {
+                        if ("person".equalsIgnoreCase(category.getLabel())) {
+                            confidence = Math.max(confidence, category.getScore());
+                        }
+                    }
+                    if (confidence < PERSON_SCORE_THRESHOLD) continue;
+
+                    android.graphics.RectF rect = detection.getBoundingBox();
+                    boxes.add(new ScreenMotionState.PlayerBox(
+                            rect.left / (float) width,
+                            rect.top / (float) height,
+                            rect.right / (float) width,
+                            rect.bottom / (float) height,
+                            confidence));
+                }
+
+                ScreenMotionState.detectedPlayers =
+                        boxes.toArray(new ScreenMotionState.PlayerBox[0]);
+                ScreenMotionState.level = boxes.size() == 0
+                        ? "بازیکن قابل تشخیص نیست"
+                        : boxes.size() + " بازیکن احتمالی";
+            } catch (Exception ignored) {
+                ScreenMotionState.level = "خطا در تحلیل فریم";
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            }
+        }
+    }
+
+    private void updateMotionMetric(
+            ByteBuffer buffer, int rowStride, int pixelStride, int width, int height) {
         int patch = Math.min(112, Math.min(width, height) / 3);
         int left = Math.max(0, width / 2 - patch / 2);
         int top = Math.max(0, height / 2 - patch / 2);
@@ -166,15 +238,32 @@ public class ScreenAnalysisService extends Service {
             float raw = (sum / (float) current.length) * 100f / 255f;
             smoothedScore = smoothedScore == 0f ? raw : (smoothedScore * 0.65f + raw * 0.35f);
             ScreenMotionState.motionScore = smoothedScore;
-            if (smoothedScore < 1.5f) {
-                ScreenMotionState.level = "تغییر کم";
-            } else if (smoothedScore < 5.0f) {
-                ScreenMotionState.level = "تغییر متوسط";
-            } else {
-                ScreenMotionState.level = "تغییر زیاد";
-            }
         }
         previous = current;
+    }
+
+    private Bitmap imageToBitmap(
+            ByteBuffer source, int rowStride, int pixelStride, int width, int height) {
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        int[] pixels = new int[width * height];
+        for (int y = 0; y < height; y++) {
+            int row = y * rowStride;
+            int dest = y * width;
+            for (int x = 0; x < width; x++) {
+                int index = row + x * pixelStride;
+                if (index + 3 >= source.limit()) {
+                    pixels[dest + x] = Color.TRANSPARENT;
+                    continue;
+                }
+                int red = source.get(index) & 0xff;
+                int green = source.get(index + 1) & 0xff;
+                int blue = source.get(index + 2) & 0xff;
+                int alpha = source.get(index + 3) & 0xff;
+                pixels[dest + x] = (alpha << 24) | (red << 16) | (green << 8) | blue;
+            }
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        return bitmap;
     }
 
     private void startAsForeground() {
@@ -184,7 +273,7 @@ public class ScreenAnalysisService extends Service {
         Notification notification = builder
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setContentTitle("OneState Aim Coach")
-                .setContentText("تحلیل محدود تصویر صفحه فعال است")
+                .setContentText("تحلیل زندهٔ تصویر با رضایت شما فعال است")
                 .setOngoing(true)
                 .build();
 
@@ -210,10 +299,15 @@ public class ScreenAnalysisService extends Service {
     public void onDestroy() {
         ScreenMotionState.active = false;
         ScreenMotionState.level = "خاموش";
+        ScreenMotionState.detectedPlayers = new ScreenMotionState.PlayerBox[0];
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (projection != null) {
             try { projection.stop(); } catch (Exception ignored) {}
+        }
+        if (objectDetector != null) {
+            try { objectDetector.close(); } catch (Exception ignored) {}
+            objectDetector = null;
         }
         if (workerThread != null) {
             workerThread.quitSafely();
