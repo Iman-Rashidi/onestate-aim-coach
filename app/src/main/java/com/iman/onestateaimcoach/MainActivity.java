@@ -39,31 +39,32 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         root.addView(text("OneState Aim Coach", 26, Color.WHITE, true));
-        addTop(root, text("مربی زندهٔ تصویر و تنظیمات برای زمان اجرای بازی", 15, Color.LTGRAY, false), 5);
-        addTop(root, text("تحلیل محدود حرکت تصویر در مرکز صفحه، بدون تشخیص دشمن یا کنترل بازی", 14, Color.rgb(121, 220, 170), true), 18);
+        addTop(root, text("مربی زندهٔ تصویر و بازخورد هنگام اجرای بازی", 15, Color.LTGRAY, false), 5);
+        addTop(root, text("تشخیص کادرِ شخص/بازیکن احتمالی از تصویر قابل‌مشاهدهٔ صفحه", 14, Color.rgb(121, 220, 170), true), 18);
 
         addSlider(root, "حساسیت دوربین (مرجع شخصی)", "camera_sensitivity", 50);
         addSlider(root, "حساسیت نشانه‌گیری (مرجع شخصی)", "aim_sensitivity", 50);
         addSlider(root, "شدت یادآوری کنترل لگد", "recoil_reminder", 50);
 
-        addTop(root, text("تحلیل زنده هنگام بازی", 18, Color.WHITE, true), 22);
+        addTop(root, text("تشخیص زندهٔ بازیکن احتمالی", 18, Color.WHITE, true), 22);
         addTop(root, text(
-                "با اجازهٔ ضبط صفحهٔ اندروید، فقط تغییرات تصویری یک ناحیهٔ کوچک در مرکز صفحه اندازه‌گیری می‌شود. " +
-                "فریم‌ها ذخیره یا ارسال نمی‌شوند. عدد خروجی شاخص تغییر تصویر است، نه احتمال اصابت یا تشخیص هدف.",
+                "مدل اولیه EfficientDet Lite0 از دستهٔ person استفاده می‌کند و کادر را روی تصویر بازی می‌کشد. " +
+                "این مدل برای بازی OneState آموزش ندیده است؛ ممکن است بازیکن را از دست بدهد یا NPC و هم‌تیمی را هم علامت بزند. " +
+                "پس در این نسخه تشخیص دشمن از دوست هنوز قابل‌اتکا نیست. تصویر فقط روی گوشی پردازش می‌شود و ذخیره یا ارسال نمی‌شود.",
                 13, Color.LTGRAY, false), 8);
 
-        Button startAnalysis = button("شروع تحلیل زندهٔ صفحه");
+        Button startAnalysis = button("شروع تشخیص زنده و نمایش کادرها");
         addTop(root, startAnalysis, 10);
         startAnalysis.setOnClickListener(v -> requestLiveAnalysis());
 
-        Button stopAnalysis = button("توقف تحلیل زنده");
+        Button stopAnalysis = button("توقف تشخیص زنده");
         addTop(root, stopAnalysis, 8);
         stopAnalysis.setOnClickListener(v -> stopService(new Intent(this, ScreenAnalysisService.class)));
 
         analysisStatus = text("", 13, Color.LTGRAY, false);
         addTop(root, analysisStatus, 8);
 
-        addTop(root, text("پنل شناور", 18, Color.WHITE, true), 22);
+        addTop(root, text("تنظیمات پنل شناور", 18, Color.WHITE, true), 22);
         overlayStatus = text("", 13, Color.LTGRAY, false);
         addTop(root, overlayStatus, 8);
 
@@ -71,13 +72,13 @@ public class MainActivity extends Activity {
         addTop(root, startOverlay, 8);
         startOverlay.setOnClickListener(v -> enableOverlay());
 
-        Button stopOverlay = button("بستن پنل شناور");
+        Button stopOverlay = button("بستن پنل و کادرهای شناور");
         addTop(root, stopOverlay, 8);
         stopOverlay.setOnClickListener(v -> stopService(new Intent(this, OverlayService.class)));
 
         addTop(root, text(
-                "برنامه ورودی بازی را کنترل نمی‌کند، نشانه را جابه‌جا نمی‌کند، شلیک خودکار ندارد و دشمن یا اطلاعات پنهان را شناسایی نمی‌کند. " +
-                "سازگاری و اثر شاخص حرکت باید روی دستگاه واقعی و در بازی آزمایش شود.",
+                "برنامه ورودی بازی را کنترل نمی‌کند، نشانه را جابه‌جا نمی‌کند و شلیک خودکار ندارد. " +
+                "تشخیص فقط از پیکسل‌های قابل‌مشاهدهٔ صفحه است و هیچ اطلاعاتی از پشت دیوار یا حافظهٔ بازی نمی‌خواند.",
                 12, Color.rgb(180, 190, 202), false), 18);
 
         setContentView(scroll);
@@ -91,6 +92,14 @@ public class MainActivity extends Activity {
     }
 
     private void requestLiveAnalysis() {
+        if (!Settings.canDrawOverlays(this)) {
+            if (analysisStatus != null) {
+                analysisStatus.setText("ابتدا اجازهٔ پنل شناور را فعال کن؛ سپس دوباره شروع را بزن.");
+            }
+            enableOverlay();
+            return;
+        }
+        startOverlayService();
         MediaProjectionManager manager =
                 (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE);
@@ -99,6 +108,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OVERLAY) {
+            if (Settings.canDrawOverlays(this)) {
+                startOverlayService();
+                if (analysisStatus != null) {
+                    analysisStatus.setText("مجوز پنل فعال شد؛ دوباره دکمهٔ شروع تشخیص را بزن.");
+                }
+            }
+            refreshStatus();
+            return;
+        }
+
         if (requestCode == REQUEST_CAPTURE) {
             if (resultCode == RESULT_OK && data != null) {
                 Intent service = new Intent(this, ScreenAnalysisService.class);
@@ -110,10 +130,10 @@ public class MainActivity extends Activity {
                     startService(service);
                 }
                 if (analysisStatus != null) {
-                    analysisStatus.setText("اجازه صادر شد؛ تحلیل زنده شروع می‌شود.");
+                    analysisStatus.setText("اجازه صادر شد؛ مدل روی تصویر زنده اجرا می‌شود.");
                 }
             } else if (analysisStatus != null) {
-                analysisStatus.setText("اجازهٔ ضبط صفحه داده نشد؛ تحلیل شروع نشد.");
+                analysisStatus.setText("اجازهٔ ضبط صفحه داده نشد؛ تشخیص شروع نشد.");
             }
         }
     }
@@ -125,25 +145,33 @@ public class MainActivity extends Activity {
             startActivityForResult(permission, REQUEST_OVERLAY);
             return;
         }
+        startOverlayService();
+        refreshStatus();
+    }
+
+    private void startOverlayService() {
         Intent service = new Intent(this, OverlayService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(service);
         } else {
             startService(service);
         }
-        refreshStatus();
     }
 
     private void refreshStatus() {
         if (overlayStatus != null) {
             overlayStatus.setText(Settings.canDrawOverlays(this)
                     ? "مجوز نمایش روی برنامه‌های دیگر فعال است."
-                    : "برای پنل شناور، مجوز نمایش روی برنامه‌های دیگر لازم است.");
+                    : "برای پنل و کادرهای زنده، مجوز نمایش روی برنامه‌های دیگر لازم است.");
         }
         if (analysisStatus != null) {
-            analysisStatus.setText(ScreenMotionState.active
-                    ? "تحلیل فعال است: " + ScreenMotionState.level
-                    : "تحلیل صفحه خاموش است.");
+            if (ScreenMotionState.active) {
+                int count = ScreenMotionState.detectedPlayers == null
+                        ? 0 : ScreenMotionState.detectedPlayers.length;
+                analysisStatus.setText("تشخیص فعال | کاندیدای شخص/بازیکن: " + count);
+            } else {
+                analysisStatus.setText("تشخیص زنده خاموش است.");
+            }
         }
     }
 
