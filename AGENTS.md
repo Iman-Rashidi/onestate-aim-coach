@@ -11,3 +11,5 @@
 - Do not change the `OverlayService` panel layout, gesture timing constants, the `AndroidManifest.xml` permission block, or `.github/workflows/android-apk-release.yml` without a stated reason.
 - CI writes build failures to the `ci-log` branch. Read that branch, identify and fix the root cause, then rerun CI.
 - Allow at most 8 repair iterations. If the same error survives two iterations, stop and report it instead of looping.
+
+<!-- CI trigger no-op: chore: trigger ci -->
