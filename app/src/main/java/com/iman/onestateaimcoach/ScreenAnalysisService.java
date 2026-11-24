@@ -51,6 +51,10 @@ public class ScreenAnalysisService extends Service {
     private long lastDetectionAt;
     private float smoothedScore;
     private OffsetRepo offsetRepo;
+    private final TargetTracker targetTracker = new TargetTracker(3);
+    private AimMath.Vec2 smoothedAimVector;
+    private long lastFpsTimestampNs;
+    private boolean fpsInitialized;
 
     @Override
     public void onCreate() {
@@ -121,7 +125,7 @@ public class ScreenAnalysisService extends Service {
             ObjectDetector.ObjectDetectorOptions options =
                     ObjectDetector.ObjectDetectorOptions.builder()
                             .setMaxResults(12)
-                            .setScoreThreshold(PERSON_SCORE_THRESHOLD)
+                            .setScoreThreshold(0.0f)
                             .build();
             objectDetector = ObjectDetector.createFromFileAndOptions(
                     getApplicationContext(), "efficientdet-lite0.tflite", options);
@@ -164,107 +168,129 @@ public class ScreenAnalysisService extends Service {
     }
 
     private void analyze(Image image) {
-        long now = System.currentTimeMillis();
-        if (now - lastFrameAt < MIN_FRAME_INTERVAL_MS) return;
-        lastFrameAt = now;
+        long startedNs = System.nanoTime();
+        boolean processedFrame = false;
+        try {
+            long now = System.currentTimeMillis();
+            if (now - lastFrameAt < MIN_FRAME_INTERVAL_MS) return;
+            lastFrameAt = now;
+            processedFrame = true;
+            Image.Plane[] planes = image.getPlanes();
+            if (planes.length == 0) return;
+            Image.Plane plane = planes[0];
+            ByteBuffer buffer = plane.getBuffer();
+            int rowStride = plane.getRowStride();
+            int pixelStride = plane.getPixelStride();
+            int width = image.getWidth();
+            int height = image.getHeight();
+            updateMotionMetric(buffer, rowStride, pixelStride, width, height);
 
-        Image.Plane[] planes = image.getPlanes();
-        if (planes.length == 0) return;
-        Image.Plane plane = planes[0];
-        ByteBuffer buffer = plane.getBuffer();
-        int rowStride = plane.getRowStride();
-        int pixelStride = plane.getPixelStride();
-        int width = image.getWidth();
-        int height = image.getHeight();
-
-        updateMotionMetric(buffer, rowStride, pixelStride, width, height);
-
-        if (objectDetector != null && now - lastDetectionAt >= MIN_DETECTION_INTERVAL_MS) {
-            lastDetectionAt = now;
-            Bitmap bitmap = null;
-            try {
-                bitmap = imageToBitmap(buffer, rowStride, pixelStride, width, height);
-                List<Detection> results = objectDetector.detect(TensorImage.fromBitmap(bitmap));
-                List<ScreenMotionState.PlayerBox> boxes = new ArrayList<>();
-
-                for (Detection detection : results) {
-                    float confidence = 0f;
-                    for (Category category : detection.getCategories()) {
-                        if ("person".equalsIgnoreCase(category.getLabel())) {
-                            confidence = Math.max(confidence, category.getScore());
+            if (objectDetector != null && now - lastDetectionAt >= MIN_DETECTION_INTERVAL_MS) {
+                lastDetectionAt = now;
+                Bitmap bitmap = null;
+                try {
+                    bitmap = imageToBitmap(buffer, rowStride, pixelStride, width, height);
+                    List<Detection> results = objectDetector.detect(TensorImage.fromBitmap(bitmap));
+                    List<ScreenMotionState.PlayerBox> boxes = new ArrayList<>();
+                    float threshold = ScreenMotionState.getConfidenceThreshold();
+                    for (Detection detection : results) {
+                        float confidence = 0f;
+                        for (Category category : detection.getCategories()) {
+                            if ("person".equalsIgnoreCase(category.getLabel()))
+                                confidence = Math.max(confidence, category.getScore());
                         }
+                        if (confidence < threshold) continue;
+                        android.graphics.RectF rect = detection.getBoundingBox();
+                        boxes.add(new ScreenMotionState.PlayerBox(
+                                rect.left / (float) width, rect.top / (float) height,
+                                rect.right / (float) width, rect.bottom / (float) height,
+                                confidence));
                     }
-                    if (confidence < PERSON_SCORE_THRESHOLD) continue;
-
-                    android.graphics.RectF rect = detection.getBoundingBox();
-                    boxes.add(new ScreenMotionState.PlayerBox(
-                            rect.left / (float) width,
-                            rect.top / (float) height,
-                            rect.right / (float) width,
-                            rect.bottom / (float) height,
-                            confidence));
+                    ScreenMotionState.detectedPlayers =
+                            boxes.toArray(new ScreenMotionState.PlayerBox[0]);
+                    updateAimGuide(boxes);
+                    ScreenMotionState.level = boxes.isEmpty()
+                            ? "بازیکن قابل تشخیص نیست" : boxes.size() + " بازیکن احتمالی";
+                } catch (Exception ignored) {
+                    ScreenMotionState.level = "خطا در تحلیل فریم";
+                } finally {
+                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                 }
-
-                ScreenMotionState.detectedPlayers =
-                        boxes.toArray(new ScreenMotionState.PlayerBox[0]);
-                updateAimGuide(boxes);
-                ScreenMotionState.level = boxes.size() == 0
-                        ? "بازیکن قابل تشخیص نیست"
-                        : boxes.size() + " بازیکن احتمالی";
-            } catch (Exception ignored) {
-                ScreenMotionState.level = "خطا در تحلیل فریم";
-            } finally {
-                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            }
+        } finally {
+            if (processedFrame) {
+                long finishedNs = System.nanoTime();
+                ScreenMotionState.inferenceLatencyMs =
+                        Math.max(0L, (finishedNs - startedNs) / 1_000_000L);
+                if (fpsInitialized) {
+                    float instantFps = 1_000_000_000f
+                            / Math.max(1L, finishedNs - lastFpsTimestampNs);
+                    ScreenMotionState.visionFps = ScreenMotionState.visionFps <= 0f
+                            ? instantFps : ScreenMotionState.visionFps * 0.80f + instantFps * 0.20f;
+                } else {
+                    fpsInitialized = true;
+                }
+                lastFpsTimestampNs = finishedNs;
             }
         }
     }
 
-
     private void updateAimGuide(List<ScreenMotionState.PlayerBox> boxes) {
-        final AimMath.Vec2 center = new AimMath.Vec2(0.5f, 0.5f);
-        ScreenMotionState.PlayerBox best = null;
-        AimMath.Vec2 bestPoint = null;
-        double bestDistance = Double.MAX_VALUE;
-
-        for (ScreenMotionState.PlayerBox box : boxes) {
-            AimMath.Vec2 target = new AimMath.Vec2(
-                    (box.left + box.right) * 0.5f,
-                    (box.top + box.bottom) * 0.5f);
-            if (!AimMath.inCone(target, center, 0.35f)) continue;
-
-            double distance = Math.hypot(target.x - center.x, target.y - center.y);
-            if (distance < bestDistance
-                    || (distance == bestDistance && best != null
-                    && box.confidence > best.confidence)) {
-                best = box;
-                bestPoint = target;
-                bestDistance = distance;
-            }
+        float fovRadius = ScreenMotionState.getFovRadius();
+        ScreenMotionState.PlayerBox selected;
+        if (ScreenMotionState.isTargetLockEnabled()) {
+            selected = targetTracker.update(
+                    boxes.toArray(new ScreenMotionState.PlayerBox[0]), fovRadius);
+        } else {
+            targetTracker.reset();
+            selected = closestTarget(boxes, fovRadius);
         }
-
-        if (bestPoint == null) {
+        ScreenMotionState.setLockedTargetBox(selected);
+        if (selected == null) {
             ScreenMotionState.aimGuideActive = false;
             ScreenMotionState.aimDeltaX = 0f;
             ScreenMotionState.aimDeltaY = 0f;
+            smoothedAimVector = null;
             return;
         }
-
+        AimMath.Vec2 targetPoint = AimMath.computeTargetPoint(
+                selected.left, selected.top, selected.right, selected.bottom,
+                ScreenMotionState.isHeadZoneEnabled());
+        AimMath.Vec2 center = new AimMath.Vec2(0.5f, 0.5f);
         float sensitivity = getSharedPreferences("coach_settings", MODE_PRIVATE)
                 .getInt("aim_sensitivity", 50) / 100.0f;
-        AimMath.Vec2 delta = AimMath.aimDelta(
-                bestPoint, center, sensitivity, 0.01f, 0.25f);
-        if (delta == null) {
+        AimMath.Vec2 rawDelta = AimMath.aimDelta(
+                targetPoint, center, sensitivity, 0.01f, 0.25f);
+        if (rawDelta == null) {
             ScreenMotionState.aimGuideActive = false;
             ScreenMotionState.aimDeltaX = 0f;
             ScreenMotionState.aimDeltaY = 0f;
+            smoothedAimVector = null;
             return;
         }
-
-        ScreenMotionState.aimTargetX = bestPoint.x;
-        ScreenMotionState.aimTargetY = bestPoint.y;
-        ScreenMotionState.aimDeltaX = delta.x;
-        ScreenMotionState.aimDeltaY = delta.y;
+        smoothedAimVector = AimMath.smoothVector(
+                rawDelta, smoothedAimVector, ScreenMotionState.getSmoothingAlpha());
+        ScreenMotionState.aimTargetX = targetPoint.x;
+        ScreenMotionState.aimTargetY = targetPoint.y;
+        ScreenMotionState.aimDeltaX = smoothedAimVector.x;
+        ScreenMotionState.aimDeltaY = smoothedAimVector.y;
         ScreenMotionState.aimGuideActive = true;
+    }
+
+    private ScreenMotionState.PlayerBox closestTarget(
+            List<ScreenMotionState.PlayerBox> boxes, float radius) {
+        ScreenMotionState.PlayerBox best = null;
+        float bestDistance = Float.MAX_VALUE;
+        AimMath.Vec2 center = new AimMath.Vec2(0.5f, 0.5f);
+        for (ScreenMotionState.PlayerBox box : boxes) {
+            AimMath.Vec2 point = AimMath.computeTargetPoint(
+                    box.left, box.top, box.right, box.bottom,
+                    ScreenMotionState.isHeadZoneEnabled());
+            if (!AimMath.inCone(point, center, radius)) continue;
+            float distance = (float) Math.hypot(point.x - center.x, point.y - center.y);
+            if (distance < bestDistance) { bestDistance = distance; best = box; }
+        }
+        return best;
     }
 
     private void updateMotionMetric(
@@ -367,6 +393,11 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.aimGuideActive = false;
         ScreenMotionState.aimDeltaX = 0f;
         ScreenMotionState.aimDeltaY = 0f;
+        ScreenMotionState.setLockedTargetBox(null);
+        ScreenMotionState.visionFps = 0f;
+        ScreenMotionState.inferenceLatencyMs = 0L;
+        targetTracker.reset();
+        smoothedAimVector = null;
         ScreenMotionState.offsetContractReady = false;
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();

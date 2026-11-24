@@ -13,6 +13,40 @@ public final class ScreenMotionState {
     public static volatile float aimDeltaX = 0f;
     public static volatile float aimDeltaY = 0f;
 
+    private static volatile float fovRadius = 0.35f;
+    private static volatile boolean headZoneEnabled = false;
+    private static volatile boolean targetLockEnabled = true;
+    private static volatile float smoothingAlpha = 0.45f;
+    private static volatile float confidenceThreshold = 0.38f;
+    private static volatile boolean showFovCircle = true;
+    public static volatile float visionFps = 0f;
+    public static volatile long inferenceLatencyMs = 0L;
+    private static volatile PlayerBox lockedTargetBox;
+
+    public static float getFovRadius() { return fovRadius; }
+    public static void setFovRadius(float value) {
+        if (!Float.isNaN(value) && !Float.isInfinite(value))
+            fovRadius = Math.max(0.10f, Math.min(0.80f, value));
+    }
+    public static boolean isHeadZoneEnabled() { return headZoneEnabled; }
+    public static void setHeadZoneEnabled(boolean value) { headZoneEnabled = value; }
+    public static boolean isTargetLockEnabled() { return targetLockEnabled; }
+    public static void setTargetLockEnabled(boolean value) { targetLockEnabled = value; }
+    public static float getSmoothingAlpha() { return smoothingAlpha; }
+    public static void setSmoothingAlpha(float value) {
+        if (!Float.isNaN(value) && !Float.isInfinite(value))
+            smoothingAlpha = Math.max(0.10f, Math.min(1.0f, value));
+    }
+    public static float getConfidenceThreshold() { return confidenceThreshold; }
+    public static void setConfidenceThreshold(float value) {
+        if (!Float.isNaN(value) && !Float.isInfinite(value))
+            confidenceThreshold = Math.max(0.05f, Math.min(0.99f, value));
+    }
+    public static boolean isShowFovCircle() { return showFovCircle; }
+    public static void setShowFovCircle(boolean value) { showFovCircle = value; }
+    public static PlayerBox getLockedTargetBox() { return lockedTargetBox; }
+    public static void setLockedTargetBox(PlayerBox value) { lockedTargetBox = value; }
+
     private static boolean healthSlotEnabled;
     private static boolean coordinateSlotEnabled;
     private static float healthValue;

@@ -36,6 +36,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.SeekBar;
 
 import java.util.Locale;
 
@@ -64,6 +65,13 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private EditText xValueInput;
     private EditText yValueInput;
     private EditText zValueInput;
+    private CheckBox headZoneToggle;
+    private CheckBox stickyLockToggle;
+    private CheckBox showFovToggle;
+    private SeekBar fovSeekBar;
+    private SeekBar smoothingSeekBar;
+    private TextView fovValueLabel;
+    private TextView smoothingValueLabel;
     private OffsetRepo offsetRepo;
     private boolean bindingTelemetry;
     private DetectionDrawingView detectionView;
@@ -92,6 +100,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         preferences.registerOnSharedPreferenceChangeListener(this);
         initializeTelemetryState();
+        loadVisionSettings();
         createNotificationChannel();
         startAsForeground();
         if (Settings.canDrawOverlays(this)) createPanel();
@@ -186,6 +195,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         details.addView(hint, hp);
         expandedPanel.addView(details);
         addTelemetryControls();
+        addVisionControls();
 
         collapse.setOnClickListener(v -> setCompact(true));
         close.setOnClickListener(v -> stopSelf());
@@ -465,6 +475,94 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         updateTelemetryStatus();
     }
 
+    private void loadVisionSettings() {
+        ScreenMotionState.setFovRadius(preferences.getFloat("vision_fov_radius", 0.35f));
+        ScreenMotionState.setHeadZoneEnabled(preferences.getBoolean("vision_head_zone", false));
+        ScreenMotionState.setTargetLockEnabled(preferences.getBoolean("vision_sticky_lock", true));
+        ScreenMotionState.setShowFovCircle(preferences.getBoolean("vision_show_fov", true));
+        ScreenMotionState.setSmoothingAlpha(preferences.getFloat("vision_smoothing", 0.45f));
+    }
+
+    private void addVisionControls() {
+        LinearLayout group = telemetryGroup("راهنمای بصری زنده");
+        headZoneToggle = new CheckBox(this);
+        headZoneToggle.setTextColor(Color.WHITE);
+        headZoneToggle.setChecked(ScreenMotionState.isHeadZoneEnabled());
+        group.addView(headZoneToggle);
+        stickyLockToggle = new CheckBox(this);
+        stickyLockToggle.setTextColor(Color.WHITE);
+        stickyLockToggle.setChecked(ScreenMotionState.isTargetLockEnabled());
+        group.addView(stickyLockToggle);
+        showFovToggle = new CheckBox(this);
+        showFovToggle.setText("Show FOV Circle");
+        showFovToggle.setTextColor(Color.WHITE);
+        showFovToggle.setChecked(ScreenMotionState.isShowFovCircle());
+        group.addView(showFovToggle);
+        fovValueLabel = label("", 10, Color.LTGRAY, true);
+        group.addView(fovValueLabel);
+        fovSeekBar = new SeekBar(this);
+        fovSeekBar.setMax(70);
+        fovSeekBar.setProgress(Math.round((ScreenMotionState.getFovRadius() - 0.10f) * 100f));
+        group.addView(fovSeekBar);
+        smoothingValueLabel = label("", 10, Color.LTGRAY, true);
+        group.addView(smoothingValueLabel);
+        smoothingSeekBar = new SeekBar(this);
+        smoothingSeekBar.setMax(90);
+        smoothingSeekBar.setProgress(Math.round((ScreenMotionState.getSmoothingAlpha() - 0.10f) * 100f));
+        group.addView(smoothingSeekBar);
+        expandedPanel.addView(group);
+        updateVisionControlLabels();
+
+        headZoneToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setHeadZoneEnabled(checked);
+            preferences.edit().putBoolean("vision_head_zone", checked).apply();
+            updateVisionControlLabels();
+            if (detectionView != null) detectionView.invalidate();
+        });
+        stickyLockToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setTargetLockEnabled(checked);
+            preferences.edit().putBoolean("vision_sticky_lock", checked).apply();
+            updateVisionControlLabels();
+        });
+        showFovToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setShowFovCircle(checked);
+            preferences.edit().putBoolean("vision_show_fov", checked).apply();
+            if (detectionView != null) detectionView.invalidate();
+        });
+        fovSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float radius = (10 + progress) / 100f;
+                ScreenMotionState.setFovRadius(radius);
+                fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%", 10 + progress));
+                if (fromUser) preferences.edit().putFloat("vision_fov_radius", radius).apply();
+                if (detectionView != null) detectionView.invalidate();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        smoothingSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float alpha = (10 + progress) / 100f;
+                ScreenMotionState.setSmoothingAlpha(alpha);
+                smoothingValueLabel.setText(String.format(Locale.US, "Smoothing: %d%%", 10 + progress));
+                if (fromUser) preferences.edit().putFloat("vision_smoothing", alpha).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+    }
+
+    private void updateVisionControlLabels() {
+        if (headZoneToggle != null) headZoneToggle.setText(
+                ScreenMotionState.isHeadZoneEnabled() ? "Target Zone: HEAD" : "Target Zone: BODY");
+        if (stickyLockToggle != null) stickyLockToggle.setText(
+                ScreenMotionState.isTargetLockEnabled() ? "Sticky Lock: ON" : "Sticky Lock: OFF");
+        if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%",
+                Math.round(ScreenMotionState.getFovRadius() * 100f)));
+        if (smoothingValueLabel != null) smoothingValueLabel.setText(String.format(Locale.US, "Smoothing: %d%%",
+                Math.round(ScreenMotionState.getSmoothingAlpha() * 100f)));
+    }
+
     private LinearLayout telemetryGroup(String heading) {
         LinearLayout group = new LinearLayout(this);
         group.setOrientation(LinearLayout.VERTICAL);
@@ -576,6 +674,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint aimGuidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint aimCenterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fovPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint lockedBoxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint hudBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint hudTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint targetPointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         DetectionDrawingView() {
             super(OverlayService.this);
@@ -586,58 +689,96 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             labelPaint.setTextSize(dp(11));
             labelPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
-            labelBackground.setColor(Color.argb(220, 145, 28, 28));
             aimGuidePaint.setColor(Color.rgb(70, 220, 190));
             aimGuidePaint.setStyle(Paint.Style.STROKE);
             aimGuidePaint.setStrokeWidth(dp(2));
             aimCenterPaint.setColor(Color.rgb(70, 220, 190));
             aimCenterPaint.setStyle(Paint.Style.STROKE);
             aimCenterPaint.setStrokeWidth(dp(2));
+            fovPaint.setStyle(Paint.Style.STROKE);
+            fovPaint.setStrokeWidth(dp(2));
+            lockedBoxPaint.setColor(Color.rgb(70, 235, 145));
+            lockedBoxPaint.setStyle(Paint.Style.STROKE);
+            lockedBoxPaint.setStrokeWidth(dp(3));
+            hudBackgroundPaint.setColor(Color.argb(205, 12, 20, 31));
+            hudTextPaint.setColor(Color.WHITE);
+            hudTextPaint.setTextSize(dp(11));
+            hudTextPaint.setTypeface(android.graphics.Typeface.create(
+                    "sans-serif-medium", android.graphics.Typeface.BOLD));
+            targetPointPaint.setColor(Color.WHITE);
+            targetPointPaint.setStyle(Paint.Style.STROKE);
+            targetPointPaint.setStrokeWidth(dp(2));
             setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+            float width = getWidth(), height = getHeight();
+            if (width <= 0f || height <= 0f) return;
+            float centerX = width * 0.5f, centerY = height * 0.5f;
             ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
-            if (boxes == null) return;
-            float canvasWidth = getWidth();
-            float canvasHeight = getHeight();
-            if (canvasWidth <= 0f || canvasHeight <= 0f) return;
+            ScreenMotionState.PlayerBox locked = ScreenMotionState.getLockedTargetBox();
 
-            for (ScreenMotionState.PlayerBox box : boxes) {
-                RectF rect = new RectF(
-                        box.left * canvasWidth,
-                        box.top * canvasHeight,
-                        box.right * canvasWidth,
-                        box.bottom * canvasHeight);
-                if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
-                canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
+            if (ScreenMotionState.isShowFovCircle()) {
+                float radius = ScreenMotionState.getFovRadius() * Math.min(width, height);
+                fovPaint.setColor(locked == null
+                        ? Color.argb(190, 70, 205, 235)
+                        : Color.argb(235, 75, 225, 145));
+                canvas.drawCircle(centerX, centerY, radius, fovPaint);
+            }
 
-                String caption = String.format(Locale.US, "PLAYER? %d%%",
-                        Math.round(box.confidence * 100f));
-                float textWidth = labelPaint.measureText(caption);
-                float labelTop = Math.max(dp(20), rect.top - dp(4));
-                RectF bg = new RectF(
-                        rect.left,
-                        labelTop - dp(18),
-                        rect.left + textWidth + dp(10),
-                        labelTop);
-                canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
-                canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
+            if (boxes != null) {
+                for (ScreenMotionState.PlayerBox box : boxes) {
+                    if (box == null || box == locked) continue;
+                    RectF rect = new RectF(box.left * width, box.top * height,
+                            box.right * width, box.bottom * height);
+                    if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
+                    canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
+                    drawBoxLabel(canvas, rect, box.confidence, false);
+                }
+            }
+            if (locked != null) {
+                RectF rect = new RectF(locked.left * width, locked.top * height,
+                        locked.right * width, locked.bottom * height);
+                canvas.drawRoundRect(rect, dp(5), dp(5), lockedBoxPaint);
+                drawBoxLabel(canvas, rect, locked.confidence, true);
             }
 
             if (ScreenMotionState.aimGuideActive) {
-                float centerX = canvasWidth * 0.5f;
-                float centerY = canvasHeight * 0.5f;
-                float vectorX = centerX + ScreenMotionState.aimDeltaX * canvasWidth;
-                float vectorY = centerY + ScreenMotionState.aimDeltaY * canvasHeight;
-                float targetX = ScreenMotionState.aimTargetX * canvasWidth;
-                float targetY = ScreenMotionState.aimTargetY * canvasHeight;
+                float targetX = ScreenMotionState.aimTargetX * width;
+                float targetY = ScreenMotionState.aimTargetY * height;
+                float vectorX = centerX + ScreenMotionState.aimDeltaX * width;
+                float vectorY = centerY + ScreenMotionState.aimDeltaY * height;
                 canvas.drawCircle(centerX, centerY, dp(7), aimCenterPaint);
                 canvas.drawLine(centerX, centerY, vectorX, vectorY, aimGuidePaint);
-                canvas.drawCircle(targetX, targetY, dp(10), aimGuidePaint);
+                canvas.drawCircle(targetX, targetY, dp(9), aimGuidePaint);
+                canvas.drawLine(targetX - dp(5), targetY, targetX + dp(5), targetY, targetPointPaint);
+                canvas.drawLine(targetX, targetY - dp(5), targetX, targetY + dp(5), targetPointPaint);
+                canvas.drawCircle(targetX, targetY, dp(3), targetPointPaint);
             }
+
+            String mode = ScreenMotionState.isHeadZoneEnabled() ? "HEAD" : "BODY";
+            String hud = String.format(Locale.US, "%.1f FPS | %d ms | %s",
+                    ScreenMotionState.visionFps, ScreenMotionState.inferenceLatencyMs, mode);
+            float hudWidth = hudTextPaint.measureText(hud) + dp(16);
+            RectF hudRect = new RectF(Math.max(dp(6), width - hudWidth - dp(8)),
+                    dp(8), width - dp(8), dp(34));
+            canvas.drawRoundRect(hudRect, dp(7), dp(7), hudBackgroundPaint);
+            canvas.drawText(hud, hudRect.left + dp(8), hudRect.top + dp(18), hudTextPaint);
+        }
+
+        private void drawBoxLabel(Canvas canvas, RectF rect, float confidence, boolean isLocked) {
+            String caption = String.format(Locale.US, "%s %d%%",
+                    isLocked ? "LOCK" : "PERSON?", Math.round(confidence * 100f));
+            float textWidth = labelPaint.measureText(caption);
+            float labelTop = Math.max(dp(20), rect.top - dp(4));
+            RectF bg = new RectF(rect.left, labelTop - dp(18),
+                    rect.left + textWidth + dp(10), labelTop);
+            labelBackground.setColor(isLocked
+                    ? Color.argb(225, 20, 115, 65) : Color.argb(220, 145, 28, 28));
+            canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
+            canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
         }
     }
 
