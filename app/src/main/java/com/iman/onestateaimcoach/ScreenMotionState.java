@@ -17,7 +17,7 @@ public final class ScreenMotionState {
     private static volatile boolean headZoneEnabled = false;
     private static volatile boolean targetLockEnabled = true;
     private static volatile float smoothingAlpha = 0.45f;
-    private static volatile float confidenceThreshold = 0.38f;
+    private static volatile float confidenceThreshold = 0.26f;
     private static volatile boolean showFovCircle = true;
     private static volatile boolean longRangeZoomEnabled = true;
     private static volatile boolean detectVehiclesEnabled = true;
