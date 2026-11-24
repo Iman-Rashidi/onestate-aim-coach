@@ -42,8 +42,62 @@ jobs:
           test -s app/src/main/assets/efficientdet-lite0.tflite
           ls -lh app/src/main/assets/efficientdet-lite0.tflite
 
-      - name: Build debug APK
-        run: gradle --no-daemon testDebugUnitTest assembleDebug --stacktrace
+      - name: Build debug APK and run unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug --stacktrace
+
+      - name: Verify and summarize JUnit XML
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = sorted(glob.glob("app/build/test-results/testDebugUnitTest/TEST-*.xml"))
+          if not reports:
+              print("::error::JUnit XML reports were not generated.")
+              sys.exit(1)
+
+          tests = failures = errors = skipped = 0
+          for report in reports:
+              root = ET.parse(report).getroot()
+              suites = [root] if root.tag == "testsuite" else root.findall(".//testsuite")
+              for suite in suites:
+                  tests += int(suite.attrib.get("tests", "0"))
+                  failures += int(suite.attrib.get("failures", "0"))
+                  errors += int(suite.attrib.get("errors", "0"))
+                  skipped += int(suite.attrib.get("skipped", "0"))
+
+          summary = (
+              f"### Unit test results\n\n"
+              f"- Tests: **{tests}**\n"
+              f"- Failures: **{failures}**\n"
+              f"- Errors: **{errors}**\n"
+              f"- Skipped: **{skipped}**\n"
+              f"- JUnit XML files: **{len(reports)}**\n"
+          )
+          print(summary)
+          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(summary)
+
+          if tests == 0:
+              print("::error::JUnit reports exist but contain zero tests.")
+              sys.exit(1)
+          if failures or errors:
+              print("::error::Unit tests failed.")
+              sys.exit(1)
+          PY
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onestate-unit-test-reports
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
