@@ -23,6 +23,16 @@ public final class ScreenMotionState {
     public static volatile long inferenceLatencyMs = 0L;
     private static volatile PlayerBox lockedTargetBox;
 
+    public static float getVisionFps() { return visionFps; }
+    public static void setVisionFps(float value) {
+        if (!Float.isNaN(value) && !Float.isInfinite(value))
+            visionFps = Math.max(0f, value);
+    }
+    public static long getInferenceLatencyMs() { return inferenceLatencyMs; }
+    public static void setInferenceLatencyMs(long value) {
+        inferenceLatencyMs = Math.max(0L, value);
+    }
+
     public static float getFovRadius() { return fovRadius; }
     public static void setFovRadius(float value) {
         if (!Float.isNaN(value) && !Float.isInfinite(value))
