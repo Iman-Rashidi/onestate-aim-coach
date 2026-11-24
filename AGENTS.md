@@ -7,5 +7,5 @@
 - AOB Equivalence: `Aob.matches` (Java) and `matchMask` (C++) must remain semantically equal; `AobMaskTest` is the arbiter.
 - Memory Offsets Policy: Never invent memory offsets; offsets live exclusively in `docs/offsets.json`.
 - Safe Fallback: If a field offset is `0` or pattern is empty, the feature toggle stays inert and logs a warning without crashing.
-- Off-Limits Without Stated Reason: `OverlayService` panel layout, gesture timing constants, `AndroidManifest.xml` permission block, and `.github/workflows/android-apk-release.yml`.
+- Off-Limits Without Stated Reason: Gesture timing constants, `AndroidManifest.xml` permission block, and `.github/workflows/android-apk-release.yml` remain strictly off-limits. `OverlayService` panel layout modifications are permitted when adding local UI diagnostic/telemetry controls.
 - CI Error Loop: CI writes build failures to orphan branch `ci-log`; read it, fix the root cause, max 8 iterations (if a single error survives 2 iterations, stop and report).
