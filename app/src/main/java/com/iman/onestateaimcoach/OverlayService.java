@@ -26,6 +26,13 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -50,6 +57,15 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private TextView aimValue;
     private TextView recoilValue;
     private TextView motionValue;
+    private TextView telemetryStatus;
+    private CheckBox healthToggle;
+    private CheckBox coordinatesToggle;
+    private EditText healthValueInput;
+    private EditText xValueInput;
+    private EditText yValueInput;
+    private EditText zValueInput;
+    private OffsetRepo offsetRepo;
+    private boolean bindingTelemetry;
     private DetectionDrawingView detectionView;
     private boolean collapsed = true;
 
@@ -75,6 +91,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         super.onCreate();
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         preferences.registerOnSharedPreferenceChangeListener(this);
+        initializeTelemetryState();
         createNotificationChannel();
         startAsForeground();
         if (Settings.canDrawOverlays(this)) createPanel();
@@ -168,6 +185,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         hp.topMargin = dp(5);
         details.addView(hint, hp);
         expandedPanel.addView(details);
+        addTelemetryControls();
 
         collapse.setOnClickListener(v -> setCompact(true));
         close.setOnClickListener(v -> stopSelf());
@@ -208,6 +226,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
         params.x = Math.max(0, preferences.getInt("overlay_x", dp(16)));
         params.y = Math.max(0, preferences.getInt("overlay_y", dp(100)));
         expandedPanel.setVisibility(View.GONE);
@@ -312,6 +331,18 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private void setCompact(boolean compact) {
         collapsed = compact;
+        if (params != null) {
+            if (compact) {
+                params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                InputMethodManager input = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                View focused = panel == null ? null : panel.findFocus();
+                if (input != null && focused != null) {
+                    input.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+                }
+            } else {
+                params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+            }
+        }
         if (expandedPanel != null) expandedPanel.setVisibility(compact ? View.GONE : View.VISIBLE);
         if (bubble != null) bubble.setVisibility(compact ? View.VISIBLE : View.GONE);
         updatePanelPosition();
@@ -359,6 +390,161 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         return Math.max(min, Math.max(0, Math.min(value, Math.max(min, max))));
     }
 
+
+    private void initializeTelemetryState() {
+        offsetRepo = new OffsetRepo(getApplicationContext());
+        String pattern = offsetRepo.getPattern();
+        String mask = offsetRepo.getMask();
+        int hpOffset = offsetRepo.field("hp");
+        int xOffset = offsetRepo.field("posX");
+        int yOffset = offsetRepo.field("posY");
+        int zOffset = offsetRepo.field("posZ");
+        boolean ready = OffsetRepo.isMemoryAssistConfigured(
+                pattern, mask, hpOffset, xOffset, yOffset, zOffset);
+        ScreenMotionState.configureTelemetryAvailability(ready, ready);
+        ScreenMotionState.initializeTelemetryDefaults((float) offsetRepo.freezeValue("hpValue"));
+    }
+
+    private void addTelemetryControls() {
+        LinearLayout healthGroup = telemetryGroup("سلامت محلی (Telemetry)");
+        LinearLayout healthRow = new LinearLayout(this);
+        healthRow.setGravity(Gravity.CENTER_VERTICAL);
+        healthToggle = new CheckBox(this);
+        healthToggle.setText("فعال");
+        healthToggle.setTextColor(Color.WHITE);
+        healthToggle.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.rgb(100, 190, 255)));
+        healthRow.addView(healthToggle, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        healthValueInput = decimalInput("0.0");
+        healthRow.addView(healthValueInput, new LinearLayout.LayoutParams(dp(104), dp(42)));
+        healthGroup.addView(healthRow);
+        expandedPanel.addView(healthGroup);
+
+        LinearLayout coordinateGroup = telemetryGroup("مختصات محلی (X / Y / Z)");
+        coordinatesToggle = new CheckBox(this);
+        coordinatesToggle.setText("فعال‌سازی پیش‌نمایش مختصات");
+        coordinatesToggle.setTextColor(Color.WHITE);
+        coordinatesToggle.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.rgb(100, 190, 255)));
+        coordinateGroup.addView(coordinatesToggle);
+        LinearLayout coordinateRow = new LinearLayout(this);
+        coordinateRow.setGravity(Gravity.CENTER_VERTICAL);
+        xValueInput = coordinateInput("X");
+        yValueInput = coordinateInput("Y");
+        zValueInput = coordinateInput("Z");
+        coordinateRow.addView(xValueInput, weightedInputParams());
+        coordinateRow.addView(yValueInput, weightedInputParams());
+        coordinateRow.addView(zValueInput, weightedInputParams());
+        coordinateGroup.addView(coordinateRow);
+        expandedPanel.addView(coordinateGroup);
+
+        telemetryStatus = label("", 10, Color.rgb(190, 205, 220), false);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(4);
+        expandedPanel.addView(telemetryStatus, statusParams);
+
+        bindingTelemetry = true;
+        healthToggle.setChecked(ScreenMotionState.isHealthSlotEnabled());
+        coordinatesToggle.setChecked(ScreenMotionState.isCoordinateSlotEnabled());
+        healthValueInput.setText(formatFloat(ScreenMotionState.getHealthValue()));
+        xValueInput.setText(formatFloat(ScreenMotionState.getXValue()));
+        yValueInput.setText(formatFloat(ScreenMotionState.getYValue()));
+        zValueInput.setText(formatFloat(ScreenMotionState.getZValue()));
+        bindingTelemetry = false;
+
+        healthToggle.setOnCheckedChangeListener((button, checked) -> {
+            if (!bindingTelemetry) ScreenMotionState.setHealthSlotEnabled(checked);
+            updateTelemetryStatus();
+        });
+        coordinatesToggle.setOnCheckedChangeListener((button, checked) -> {
+            if (!bindingTelemetry) ScreenMotionState.setCoordinateSlotEnabled(checked);
+            updateTelemetryStatus();
+        });
+        healthValueInput.addTextChangedListener(valueWatcher(ScreenMotionState::setHealthValue));
+        xValueInput.addTextChangedListener(valueWatcher(ScreenMotionState::setXValue));
+        yValueInput.addTextChangedListener(valueWatcher(ScreenMotionState::setYValue));
+        zValueInput.addTextChangedListener(valueWatcher(ScreenMotionState::setZValue));
+        updateTelemetryStatus();
+    }
+
+    private LinearLayout telemetryGroup(String heading) {
+        LinearLayout group = new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(dp(8), dp(5), dp(8), dp(5));
+        group.setBackground(roundedBackground(Color.argb(150, 35, 49, 66), Color.rgb(72, 99, 126)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(7);
+        TextView title = label(heading, 11, Color.rgb(132, 225, 178), true);
+        group.addView(title);
+        return group;
+    }
+
+    private GradientDrawable roundedBackground(int fill, int stroke) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fill);
+        drawable.setCornerRadius(dp(8));
+        drawable.setStroke(dp(1), stroke);
+        return drawable;
+    }
+
+    private EditText decimalInput(String hint) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setTextSize(13);
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(Color.LTGRAY);
+        input.setHint(hint);
+        input.setGravity(Gravity.CENTER);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        input.setSelectAllOnFocus(true);
+        input.setPadding(dp(4), 0, dp(4), 0);
+        input.setBackground(roundedBackground(Color.argb(210, 15, 24, 36), Color.rgb(83, 111, 139)));
+        input.setFocusable(true);
+        input.setFocusableInTouchMode(true);
+        return input;
+    }
+
+    private EditText coordinateInput(String axis) {
+        EditText input = decimalInput(axis);
+        input.setContentDescription("مقدار محلی محور " + axis);
+        return input;
+    }
+
+    private LinearLayout.LayoutParams weightedInputParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        params.setMargins(dp(2), 0, dp(2), 0);
+        return params;
+    }
+
+    private TextWatcher valueWatcher(java.util.function.Consumer<Float> consumer) {
+        return new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (!bindingTelemetry) consumer.accept(ScreenMotionState.parseFloatOrZero(s == null ? null : s.toString()));
+            }
+            @Override public void afterTextChanged(Editable editable) {}
+        };
+    }
+
+    private void updateTelemetryStatus() {
+        if (telemetryStatus == null) return;
+        boolean healthEnabled = ScreenMotionState.isHealthSlotEnabled();
+        boolean coordinatesEnabled = ScreenMotionState.isCoordinateSlotEnabled();
+        boolean healthInert = ScreenMotionState.isHealthSlotInert();
+        boolean coordinatesInert = ScreenMotionState.isCoordinateSlotInert();
+        String healthText = healthEnabled
+                ? (healthInert ? "سلامت: پیش‌نمایش محلی، آفست تنظیم نشده" : "سلامت: فقط مقدار محلی")
+                : "سلامت: خاموش";
+        String coordinateText = coordinatesEnabled
+                ? (coordinatesInert ? "مختصات: پیش‌نمایش محلی، آفست تنظیم نشده" : "مختصات: فقط مقدار محلی")
+                : "مختصات: خاموش";
+        telemetryStatus.setText(healthText + " | " + coordinateText);
+    }
+
+    private String formatFloat(float value) {
+        return String.format(Locale.US, "%.2f", value);
+    }
+
     private void updateValues() {
         if (preferences == null || cameraValue == null) return;
         cameraValue.setText("دوربین: " + preferences.getInt("camera_sensitivity", 50) + "/100");
@@ -375,6 +561,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 motionValue.setText("تحلیل زنده: خاموش");
             }
         }
+        updateTelemetryStatus();
         if (bubbleBackground != null) {
             bubbleBackground.setStroke(dp(2), ScreenMotionState.active
                     ? Color.rgb(74, 210, 145) : Color.rgb(53, 169, 255));
