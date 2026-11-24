@@ -113,7 +113,12 @@ public final class OffsetRepo {
                 warnOnce("freeze:" + name, "Freeze value '" + name + "' is unavailable");
                 return 0d;
             }
-            return freeze.getDouble(name);
+            double value = freeze.getDouble(name);
+            if (value == 0d) {
+                warnOnce("freeze:" + name, "Freeze value '" + name + "' is zero; feature remains inert");
+                return 0d;
+            }
+            return value;
         } catch (Exception error) {
             warnOnce("freeze:" + name, "Freeze value '" + name + "' is unavailable");
             return 0d;
