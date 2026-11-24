@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(15, 23, 34));
         scroll.addView(root);
 
-        root.addView(text("OneState Aim Coach", 26, Color.WHITE, true));
+        root.addView(text("Process Inspector", 26, Color.WHITE, true));
         addTop(root, text("مربی زندهٔ تصویر و بازخورد هنگام اجرای بازی", 15, Color.LTGRAY, false), 5);
         addTop(root, text("تشخیص کادرِ شخص/بازیکن احتمالی از تصویر قابل‌مشاهدهٔ صفحه", 14, Color.rgb(121, 220, 170), true), 18);
 
