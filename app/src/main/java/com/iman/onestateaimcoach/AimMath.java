@@ -44,6 +44,31 @@ public final class AimMath {
                 previous.y + (current.y - previous.y) * alpha);
     }
 
+    public static float[] mapCropBoxToFullScreen(float left, float top, float right, float bottom,
+            float cropLeft, float cropTop, float cropWidth, float cropHeight) {
+        float cl = clamp01(cropLeft), ct = clamp01(cropTop);
+        float cw = Math.max(0f, Math.min(1f - cl, cropWidth));
+        float ch = Math.max(0f, Math.min(1f - ct, cropHeight));
+        return new float[] { clamp01(cl + clamp01(left) * cw), clamp01(ct + clamp01(top) * ch),
+                clamp01(cl + clamp01(right) * cw), clamp01(ct + clamp01(bottom) * ch) };
+    }
+
+    public static float computeIoU(float leftA, float topA, float rightA, float bottomA,
+            float leftB, float topB, float rightB, float bottomB) {
+        float iw = Math.max(0f, Math.min(rightA, rightB) - Math.max(leftA, leftB));
+        float ih = Math.max(0f, Math.min(bottomA, bottomB) - Math.max(topA, topB));
+        float intersection = iw * ih;
+        float areaA = Math.max(0f, rightA-leftA) * Math.max(0f, bottomA-topA);
+        float areaB = Math.max(0f, rightB-leftB) * Math.max(0f, bottomB-topB);
+        float union = areaA + areaB - intersection;
+        return union <= 0f ? 0f : intersection / union;
+    }
+
+    private static float clamp01(float value) {
+        if (Float.isNaN(value) || Float.isInfinite(value)) return 0f;
+        return Math.max(0f, Math.min(1f, value));
+    }
+
     public static boolean inCone(Vec2 target, Vec2 center, float radius) {
         if (target == null || center == null || radius < 0f) return false;
         return Math.hypot(target.x - center.x, target.y - center.y) <= radius;
