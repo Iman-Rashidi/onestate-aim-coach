@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.graphics.Canvas;
@@ -26,9 +27,14 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.text.InputType;
 
 import java.util.Locale;
 
@@ -143,7 +149,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = label("AIM COACH", 13, Color.WHITE, true);
+        TextView title = label("PROCESS INSPECTOR", 13, Color.WHITE, true);
         header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1));
         TextView collapse = action("−");
         header.addView(collapse);
@@ -167,6 +173,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
+        addPinnedSlots(details);
         expandedPanel.addView(details);
 
         collapse.setOnClickListener(v -> setCompact(true));
@@ -312,6 +319,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private void setCompact(boolean compact) {
         collapsed = compact;
+        if (params != null) {
+            params.flags = compact
+                    ? WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    : WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+        }
         if (expandedPanel != null) expandedPanel.setVisibility(compact ? View.GONE : View.VISIBLE);
         if (bubble != null) bubble.setVisibility(compact ? View.VISIBLE : View.GONE);
         updatePanelPosition();
@@ -381,6 +393,78 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             if (bubble != null) bubble.invalidate();
         }
         if (detectionView != null) detectionView.invalidate();
+    }
+
+    /**
+     * These four rows edit local preferences only. They are not connected to
+     * the selected process and do not read or write process memory.
+     */
+    private void addPinnedSlots(LinearLayout parent) {
+        TextView section = label("مقادیر ذخیره‌شده (تنظیم محلی، بدون نوشتن در حافظه)", 11,
+                Color.rgb(132, 225, 178), true);
+        LinearLayout.LayoutParams sectionParams = new LinearLayout.LayoutParams(-1, -2);
+        sectionParams.topMargin = dp(12);
+        parent.addView(section, sectionParams);
+
+        TextView target = label(
+                "Target: " + PinnedSlotConfig.TARGET_PACKAGE + "\nModule: " + PinnedSlotConfig.MODULE_NAME,
+                10, Color.LTGRAY, false);
+        LinearLayout.LayoutParams targetParams = new LinearLayout.LayoutParams(-1, -2);
+        targetParams.topMargin = dp(4);
+        parent.addView(target, targetParams);
+
+        for (PinnedSlotConfig.Slot slot : PinnedSlotConfig.ALL) {
+            addPinnedSlotRow(parent, slot);
+        }
+    }
+
+    private void addPinnedSlotRow(LinearLayout parent, PinnedSlotConfig.Slot slot) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(42));
+        rowParams.topMargin = dp(3);
+        parent.addView(row, rowParams);
+
+        CheckBox enabled = new CheckBox(this);
+        enabled.setText(slot.label);
+        enabled.setTextColor(Color.WHITE);
+        enabled.setTextSize(11);
+        enabled.setButtonTintList(ColorStateList.valueOf(Color.rgb(100, 190, 255)));
+        enabled.setChecked(PinnedSlotConfig.isEnabled(preferences, slot));
+        enabled.setOnCheckedChangeListener((button, checked) ->
+                PinnedSlotConfig.setEnabled(preferences, slot, checked));
+        row.addView(enabled, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        EditText value = new EditText(this);
+        value.setSingleLine(true);
+        value.setTextSize(12);
+        value.setTextColor(Color.WHITE);
+        value.setHintTextColor(Color.LTGRAY);
+        value.setHint("Float");
+        value.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        value.setSelectAllOnFocus(true);
+        value.setPadding(dp(7), 0, dp(7), 0);
+        value.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(100, 190, 255)));
+        value.setText(String.format(Locale.US, "%.4f",
+                PinnedSlotConfig.getValue(preferences, slot)));
+        row.addView(value, new LinearLayout.LayoutParams(dp(104), dp(38)));
+
+        value.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable editable) {
+                String raw = editable == null ? "" : editable.toString().trim();
+                if (raw.isEmpty() || "-".equals(raw) || ".".equals(raw) || "-.".equals(raw)) return;
+                try {
+                    PinnedSlotConfig.setValue(preferences, slot, Float.parseFloat(raw));
+                } catch (NumberFormatException ignored) {
+                    // Keep the last valid persisted float while the user edits.
+                }
+            }
+        });
     }
 
     private final class DetectionDrawingView extends View {
