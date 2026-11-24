@@ -25,6 +25,20 @@ public final class OffsetRepo {
         loadOnce(context == null ? null : context.getApplicationContext());
     }
 
+    /** Pure validation helper; zero offsets or missing signatures keep memory features inert. */
+    public static boolean isMemoryAssistConfigured(String pattern, String mask, int... fields) {
+        if (pattern == null || pattern.trim().isEmpty()
+                || mask == null || mask.trim().isEmpty()
+                || pattern.length() != mask.length()
+                || fields == null || fields.length == 0) {
+            return false;
+        }
+        for (int field : fields) {
+            if (field == 0) return false;
+        }
+        return true;
+    }
+
     private static void loadOnce(Context context) {
         if (cachedConfig != null) return;
         synchronized (OffsetRepo.class) {

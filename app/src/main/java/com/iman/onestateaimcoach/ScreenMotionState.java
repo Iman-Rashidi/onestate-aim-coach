@@ -6,6 +6,12 @@ public final class ScreenMotionState {
     public static volatile float motionScore = 0f;
     public static volatile String level = "خاموش";
     public static volatile PlayerBox[] detectedPlayers = new PlayerBox[0];
+    public static volatile boolean offsetContractReady = false;
+    public static volatile boolean aimGuideActive = false;
+    public static volatile float aimTargetX = 0.5f;
+    public static volatile float aimTargetY = 0.5f;
+    public static volatile float aimDeltaX = 0f;
+    public static volatile float aimDeltaY = 0f;
 
     public static final class PlayerBox {
         public final float left;
@@ -23,6 +29,7 @@ public final class ScreenMotionState {
         }
 
         private static float clamp(float value) {
+            if (Float.isNaN(value) || Float.isInfinite(value)) return 0f;
             return Math.max(0f, Math.min(1f, value));
         }
     }

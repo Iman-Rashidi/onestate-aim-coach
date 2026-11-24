@@ -387,6 +387,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint aimGuidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint aimCenterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         DetectionDrawingView() {
             super(OverlayService.this);
@@ -398,6 +400,12 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             labelPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
             labelBackground.setColor(Color.argb(220, 145, 28, 28));
+            aimGuidePaint.setColor(Color.rgb(70, 220, 190));
+            aimGuidePaint.setStyle(Paint.Style.STROKE);
+            aimGuidePaint.setStrokeWidth(dp(2));
+            aimCenterPaint.setColor(Color.rgb(70, 220, 190));
+            aimCenterPaint.setStyle(Paint.Style.STROKE);
+            aimCenterPaint.setStrokeWidth(dp(2));
             setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
@@ -408,6 +416,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             if (boxes == null) return;
             float canvasWidth = getWidth();
             float canvasHeight = getHeight();
+            if (canvasWidth <= 0f || canvasHeight <= 0f) return;
 
             for (ScreenMotionState.PlayerBox box : boxes) {
                 RectF rect = new RectF(
@@ -429,6 +438,18 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                         labelTop);
                 canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
                 canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
+            }
+
+            if (ScreenMotionState.aimGuideActive) {
+                float centerX = canvasWidth * 0.5f;
+                float centerY = canvasHeight * 0.5f;
+                float vectorX = centerX + ScreenMotionState.aimDeltaX * canvasWidth;
+                float vectorY = centerY + ScreenMotionState.aimDeltaY * canvasHeight;
+                float targetX = ScreenMotionState.aimTargetX * canvasWidth;
+                float targetY = ScreenMotionState.aimTargetY * canvasHeight;
+                canvas.drawCircle(centerX, centerY, dp(7), aimCenterPaint);
+                canvas.drawLine(centerX, centerY, vectorX, vectorY, aimGuidePaint);
+                canvas.drawCircle(targetX, targetY, dp(10), aimGuidePaint);
             }
         }
     }

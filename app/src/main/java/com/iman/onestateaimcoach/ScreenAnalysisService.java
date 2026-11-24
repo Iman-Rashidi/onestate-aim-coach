@@ -50,10 +50,25 @@ public class ScreenAnalysisService extends Service {
     private long lastFrameAt;
     private long lastDetectionAt;
     private float smoothedScore;
+    private OffsetRepo offsetRepo;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        offsetRepo = new OffsetRepo(getApplicationContext());
+        String pattern = offsetRepo.getPattern();
+        String mask = offsetRepo.getMask();
+        int[] fields = new int[] {
+                offsetRepo.field("hp"),
+                offsetRepo.field("posX"),
+                offsetRepo.field("posY"),
+                offsetRepo.field("posZ"),
+                offsetRepo.field("speed")
+        };
+        ScreenMotionState.offsetContractReady =
+                OffsetRepo.isMemoryAssistConfigured(pattern, mask, fields)
+                        && offsetRepo.getChain() != null;
+        // No process-memory reader exists in this visual-only app. JNI is limited to byte arrays.
         createChannel();
     }
 
@@ -192,6 +207,7 @@ public class ScreenAnalysisService extends Service {
 
                 ScreenMotionState.detectedPlayers =
                         boxes.toArray(new ScreenMotionState.PlayerBox[0]);
+                updateAimGuide(boxes);
                 ScreenMotionState.level = boxes.size() == 0
                         ? "بازیکن قابل تشخیص نیست"
                         : boxes.size() + " بازیکن احتمالی";
@@ -201,6 +217,54 @@ public class ScreenAnalysisService extends Service {
                 if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             }
         }
+    }
+
+
+    private void updateAimGuide(List<ScreenMotionState.PlayerBox> boxes) {
+        final AimMath.Vec2 center = new AimMath.Vec2(0.5f, 0.5f);
+        ScreenMotionState.PlayerBox best = null;
+        AimMath.Vec2 bestPoint = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (ScreenMotionState.PlayerBox box : boxes) {
+            AimMath.Vec2 target = new AimMath.Vec2(
+                    (box.left + box.right) * 0.5f,
+                    (box.top + box.bottom) * 0.5f);
+            if (!AimMath.inCone(target, center, 0.35f)) continue;
+
+            double distance = Math.hypot(target.x - center.x, target.y - center.y);
+            if (distance < bestDistance
+                    || (distance == bestDistance && best != null
+                    && box.confidence > best.confidence)) {
+                best = box;
+                bestPoint = target;
+                bestDistance = distance;
+            }
+        }
+
+        if (bestPoint == null) {
+            ScreenMotionState.aimGuideActive = false;
+            ScreenMotionState.aimDeltaX = 0f;
+            ScreenMotionState.aimDeltaY = 0f;
+            return;
+        }
+
+        float sensitivity = getSharedPreferences("coach_settings", MODE_PRIVATE)
+                .getInt("aim_sensitivity", 50) / 100.0f;
+        AimMath.Vec2 delta = AimMath.aimDelta(
+                bestPoint, center, sensitivity, 0.01f, 0.25f);
+        if (delta == null) {
+            ScreenMotionState.aimGuideActive = false;
+            ScreenMotionState.aimDeltaX = 0f;
+            ScreenMotionState.aimDeltaY = 0f;
+            return;
+        }
+
+        ScreenMotionState.aimTargetX = bestPoint.x;
+        ScreenMotionState.aimTargetY = bestPoint.y;
+        ScreenMotionState.aimDeltaX = delta.x;
+        ScreenMotionState.aimDeltaY = delta.y;
+        ScreenMotionState.aimGuideActive = true;
     }
 
     private void updateMotionMetric(
@@ -300,6 +364,10 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.active = false;
         ScreenMotionState.level = "خاموش";
         ScreenMotionState.detectedPlayers = new ScreenMotionState.PlayerBox[0];
+        ScreenMotionState.aimGuideActive = false;
+        ScreenMotionState.aimDeltaX = 0f;
+        ScreenMotionState.aimDeltaY = 0f;
+        ScreenMotionState.offsetContractReady = false;
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (projection != null) {
