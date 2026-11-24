@@ -68,6 +68,10 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private CheckBox headZoneToggle;
     private CheckBox stickyLockToggle;
     private CheckBox showFovToggle;
+    private CheckBox longRangeToggle;
+    private CheckBox vehiclesToggle;
+    private SeekBar confidenceSeekBar;
+    private TextView confidenceValueLabel;
     private SeekBar fovSeekBar;
     private SeekBar smoothingSeekBar;
     private TextView fovValueLabel;
@@ -481,6 +485,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         ScreenMotionState.setTargetLockEnabled(preferences.getBoolean("vision_sticky_lock", true));
         ScreenMotionState.setShowFovCircle(preferences.getBoolean("vision_show_fov", true));
         ScreenMotionState.setSmoothingAlpha(preferences.getFloat("vision_smoothing", 0.45f));
+        ScreenMotionState.setLongRangeZoomEnabled(preferences.getBoolean("vision_long_range_zoom", true));
+        ScreenMotionState.setDetectVehiclesEnabled(preferences.getBoolean("vision_detect_vehicles", true));
+        ScreenMotionState.setConfidenceThreshold(preferences.getFloat("vision_confidence", 0.26f));
     }
 
     private void addVisionControls() {
@@ -498,6 +505,14 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         showFovToggle.setTextColor(Color.WHITE);
         showFovToggle.setChecked(ScreenMotionState.isShowFovCircle());
         group.addView(showFovToggle);
+        longRangeToggle = new CheckBox(this);
+        longRangeToggle.setTextColor(Color.WHITE);
+        longRangeToggle.setChecked(ScreenMotionState.isLongRangeZoomEnabled());
+        group.addView(longRangeToggle);
+        vehiclesToggle = new CheckBox(this);
+        vehiclesToggle.setTextColor(Color.WHITE);
+        vehiclesToggle.setChecked(ScreenMotionState.isDetectVehiclesEnabled());
+        group.addView(vehiclesToggle);
         fovValueLabel = label("", 10, Color.LTGRAY, true);
         group.addView(fovValueLabel);
         fovSeekBar = new SeekBar(this);
@@ -510,6 +525,12 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         smoothingSeekBar.setMax(90);
         smoothingSeekBar.setProgress(Math.round((ScreenMotionState.getSmoothingAlpha() - 0.10f) * 100f));
         group.addView(smoothingSeekBar);
+        confidenceValueLabel = label("", 10, Color.LTGRAY, true);
+        group.addView(confidenceValueLabel);
+        confidenceSeekBar = new SeekBar(this);
+        confidenceSeekBar.setMax(84);
+        confidenceSeekBar.setProgress(Math.round((ScreenMotionState.getConfidenceThreshold() - 0.15f) * 100f));
+        group.addView(confidenceSeekBar);
         expandedPanel.addView(group);
         updateVisionControlLabels();
 
@@ -523,6 +544,27 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             ScreenMotionState.setTargetLockEnabled(checked);
             preferences.edit().putBoolean("vision_sticky_lock", checked).apply();
             updateVisionControlLabels();
+        });
+        longRangeToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setLongRangeZoomEnabled(checked);
+            preferences.edit().putBoolean("vision_long_range_zoom", checked).apply();
+            updateVisionControlLabels();
+            if (detectionView != null) detectionView.invalidate();
+        });
+        vehiclesToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setDetectVehiclesEnabled(checked);
+            preferences.edit().putBoolean("vision_detect_vehicles", checked).apply();
+            updateVisionControlLabels();
+        });
+        confidenceSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float value = (15 + progress) / 100f;
+                ScreenMotionState.setConfidenceThreshold(value);
+                confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", 15 + progress));
+                if (fromUser) preferences.edit().putFloat("vision_confidence", value).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
         showFovToggle.setOnCheckedChangeListener((button, checked) -> {
             ScreenMotionState.setShowFovCircle(checked);
@@ -557,6 +599,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 ScreenMotionState.isHeadZoneEnabled() ? "Target Zone: HEAD" : "Target Zone: BODY");
         if (stickyLockToggle != null) stickyLockToggle.setText(
                 ScreenMotionState.isTargetLockEnabled() ? "Sticky Lock: ON" : "Sticky Lock: OFF");
+        if (longRangeToggle != null) longRangeToggle.setText(ScreenMotionState.isLongRangeZoomEnabled() ? "Long-Range Zoom: ON" : "Long-Range Zoom: OFF");
+        if (vehiclesToggle != null) vehiclesToggle.setText(ScreenMotionState.isDetectVehiclesEnabled() ? "Vehicles: ON" : "Vehicles: OFF");
+        if (confidenceValueLabel != null) confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", Math.round(ScreenMotionState.getConfidenceThreshold() * 100f)));
         if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%",
                 Math.round(ScreenMotionState.getFovRadius() * 100f)));
         if (smoothingValueLabel != null) smoothingValueLabel.setText(String.format(Locale.US, "Smoothing: %d%%",
@@ -720,6 +765,13 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
             ScreenMotionState.PlayerBox locked = ScreenMotionState.getLockedTargetBox();
 
+            if (ScreenMotionState.isLongRangeZoomEnabled()) {
+                Paint zone = new Paint(Paint.ANTI_ALIAS_FLAG);
+                zone.setColor(Color.argb(105, 255, 205, 90)); zone.setStyle(Paint.Style.STROKE);
+                zone.setStrokeWidth(dp(1)); zone.setPathEffect(new android.graphics.DashPathEffect(new float[] {dp(7),dp(5)},0));
+                float cw=width*0.38f,ch=height*0.38f;
+                canvas.drawRect((width-cw)*0.5f,(height-ch)*0.5f,(width+cw)*0.5f,(height+ch)*0.5f,zone);
+            }
             if (ScreenMotionState.isShowFovCircle()) {
                 float radius = ScreenMotionState.getFovRadius() * Math.min(width, height);
                 fovPaint.setColor(locked == null
@@ -734,15 +786,17 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     RectF rect = new RectF(box.left * width, box.top * height,
                             box.right * width, box.bottom * height);
                     if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
+                    boxPaint.setColor("VEHICLE".equals(box.category) ? Color.rgb(255,190,55) : Color.rgb(255,92,92));
                     canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
-                    drawBoxLabel(canvas, rect, box.confidence, false);
+                    drawBoxLabel(canvas, rect, box, false);
                 }
             }
             if (locked != null) {
                 RectF rect = new RectF(locked.left * width, locked.top * height,
                         locked.right * width, locked.bottom * height);
+                lockedBoxPaint.setColor("VEHICLE".equals(locked.category) ? Color.rgb(255,190,55) : Color.rgb(70,235,145));
                 canvas.drawRoundRect(rect, dp(5), dp(5), lockedBoxPaint);
-                drawBoxLabel(canvas, rect, locked.confidence, true);
+                drawBoxLabel(canvas, rect, locked, true);
             }
 
             if (ScreenMotionState.aimGuideActive) {
@@ -768,15 +822,17 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             canvas.drawText(hud, hudRect.left + dp(8), hudRect.top + dp(18), hudTextPaint);
         }
 
-        private void drawBoxLabel(Canvas canvas, RectF rect, float confidence, boolean isLocked) {
-            String caption = String.format(Locale.US, "%s %d%%",
-                    isLocked ? "LOCK" : "PERSON?", Math.round(confidence * 100f));
+        private void drawBoxLabel(Canvas canvas, RectF rect, ScreenMotionState.PlayerBox box, boolean isLocked) {
+            String type = "VEHICLE".equals(box.category) ? "CAR" : "PLAYER";
+            if (box.isLongRangeZoom) type = "FAR";
+            String caption = String.format(Locale.US, "%s %d%%%s", type,
+                    Math.round(box.confidence * 100f), box.isMoving ? " [MOV]" : "");
             float textWidth = labelPaint.measureText(caption);
             float labelTop = Math.max(dp(20), rect.top - dp(4));
-            RectF bg = new RectF(rect.left, labelTop - dp(18),
-                    rect.left + textWidth + dp(10), labelTop);
-            labelBackground.setColor(isLocked
-                    ? Color.argb(225, 20, 115, 65) : Color.argb(220, 145, 28, 28));
+            RectF bg = new RectF(rect.left, labelTop - dp(18), rect.left + textWidth + dp(10), labelTop);
+            int color = "VEHICLE".equals(box.category) ? Color.argb(225,145,100,18) : Color.argb(220,145,28,28);
+            if (isLocked) color = Color.argb(225,20,115,65);
+            labelBackground.setColor(color);
             canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
             canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
         }
