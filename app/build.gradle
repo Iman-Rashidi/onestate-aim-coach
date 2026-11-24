@@ -3,23 +3,32 @@ plugins {
 }
 
 android {
-    namespace "com.iman.onestateaimcoach"
+    namespace "com.iman.procinspector"
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.iman.onestateaimcoach"
+        applicationId "com.iman.procinspector"
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName "0.3.0"
+        versionCode 4
+        versionName "0.4.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {
     implementation "org.tensorflow:tensorflow-lite-task-vision:0.4.4"
+    testImplementation "junit:junit:4.13.2"
 }
