@@ -12,8 +12,10 @@ bool matchMask(
         std::size_t patternLength,
         std::size_t dataLength,
         std::size_t offset) {
-    if (pattern == nullptr || mask == nullptr || data == nullptr) return false;
+    if (data == nullptr) return false;
     if (offset > dataLength || patternLength > dataLength - offset) return false;
+    if (patternLength == 0U) return true;
+    if (pattern == nullptr || mask == nullptr) return false;
 
     for (std::size_t i = 0; i < patternLength; ++i) {
         if (mask[i] != 0U && pattern[i] != data[offset + i]) return false;
@@ -60,6 +62,7 @@ Java_com_iman_onestateaimcoach_NativeBridge_nativeMatchMask(
             || patternLength > dataLength - static_cast<jsize>(offset)) {
         return JNI_FALSE;
     }
+    if (patternLength == 0) return JNI_TRUE;
 
     jbyte* pattern = env->GetByteArrayElements(patternArray, nullptr);
     if (pattern == nullptr) return JNI_FALSE;
