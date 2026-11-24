@@ -43,7 +43,7 @@ jobs:
           ls -lh app/src/main/assets/efficientdet-lite0.tflite
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug --stacktrace
+        run: gradle --no-daemon testDebugUnitTest assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
