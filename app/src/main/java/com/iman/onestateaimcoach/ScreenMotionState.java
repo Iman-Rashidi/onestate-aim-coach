@@ -13,6 +13,97 @@ public final class ScreenMotionState {
     public static volatile float aimDeltaX = 0f;
     public static volatile float aimDeltaY = 0f;
 
+    private static boolean healthSlotEnabled;
+    private static boolean coordinateSlotEnabled;
+    private static float healthValue;
+    private static float xValue;
+    private static float yValue;
+    private static float zValue;
+    private static boolean healthOffsetReady;
+    private static boolean coordinateOffsetsReady;
+    private static boolean telemetryDefaultsInitialized;
+
+    public static synchronized void configureTelemetryAvailability(
+            boolean healthReady, boolean coordinatesReady) {
+        healthOffsetReady = healthReady;
+        coordinateOffsetsReady = coordinatesReady;
+    }
+
+    public static synchronized void initializeTelemetryDefaults(float defaultHealthValue) {
+        if (telemetryDefaultsInitialized) return;
+        healthValue = sanitize(defaultHealthValue);
+        telemetryDefaultsInitialized = true;
+    }
+
+    public static synchronized void setHealthSlotEnabled(boolean enabled) {
+        healthSlotEnabled = enabled;
+    }
+
+    public static synchronized boolean isHealthSlotEnabled() {
+        return healthSlotEnabled;
+    }
+
+    public static synchronized boolean isHealthSlotInert() {
+        return healthSlotEnabled && !healthOffsetReady;
+    }
+
+    public static synchronized void setCoordinateSlotEnabled(boolean enabled) {
+        coordinateSlotEnabled = enabled;
+    }
+
+    public static synchronized boolean isCoordinateSlotEnabled() {
+        return coordinateSlotEnabled;
+    }
+
+    public static synchronized boolean isCoordinateSlotInert() {
+        return coordinateSlotEnabled && !coordinateOffsetsReady;
+    }
+
+    public static synchronized void setHealthValue(float value) {
+        healthValue = sanitize(value);
+    }
+
+    public static synchronized float getHealthValue() {
+        return healthValue;
+    }
+
+    public static synchronized void setXValue(float value) {
+        xValue = sanitize(value);
+    }
+
+    public static synchronized float getXValue() {
+        return xValue;
+    }
+
+    public static synchronized void setYValue(float value) {
+        yValue = sanitize(value);
+    }
+
+    public static synchronized float getYValue() {
+        return yValue;
+    }
+
+    public static synchronized void setZValue(float value) {
+        zValue = sanitize(value);
+    }
+
+    public static synchronized float getZValue() {
+        return zValue;
+    }
+
+    public static float parseFloatOrZero(String value) {
+        if (value == null || value.trim().isEmpty()) return 0f;
+        try {
+            return sanitize(Float.parseFloat(value.trim()));
+        } catch (NumberFormatException ignored) {
+            return 0f;
+        }
+    }
+
+    private static float sanitize(float value) {
+        return Float.isNaN(value) || Float.isInfinite(value) ? 0f : value;
+    }
+
     public static final class PlayerBox {
         public final float left;
         public final float top;
