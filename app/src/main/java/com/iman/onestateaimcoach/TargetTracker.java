@@ -44,7 +44,8 @@ public final class TargetTracker {
             if (candidate == null || !insideFov(candidate, radius)) continue;
             float distance = distance(px, py, centerX(candidate), centerY(candidate));
             float overlap = iou(previous, candidate);
-            if (distance > Math.max(0.18f, radius * 0.8f) && overlap < 0.01f) continue;
+            float associationLimit = Math.max(0.10f, Math.min(0.18f, radius * 0.5f));
+            if (distance > associationLimit && overlap < 0.01f) continue;
             float score = distance * 0.65f + (1f - overlap) * 0.35f;
             if (score < bestScore) { bestScore = score; best = candidate; }
         }
