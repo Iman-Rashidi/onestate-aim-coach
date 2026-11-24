@@ -1,0 +1,20 @@
+{
+  "gameVersion": "1.4.1",
+  "module": "libil2cpp.so",
+  "players": {
+    "pattern": "",
+    "mask": "",
+    "chain": [],
+    "fields": {
+      "hp": 0,
+      "posX": 0,
+      "posY": 0,
+      "posZ": 0,
+      "speed": 0
+    }
+  },
+  "freeze": {
+    "hpValue": 9999,
+    "flyHeight": 12.0
+  }
+}
