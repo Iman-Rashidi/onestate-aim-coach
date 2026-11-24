@@ -19,6 +19,8 @@ public final class ScreenMotionState {
     private static volatile float smoothingAlpha = 0.45f;
     private static volatile float confidenceThreshold = 0.38f;
     private static volatile boolean showFovCircle = true;
+    private static volatile boolean longRangeZoomEnabled = true;
+    private static volatile boolean detectVehiclesEnabled = true;
     public static volatile float visionFps = 0f;
     public static volatile long inferenceLatencyMs = 0L;
     private static volatile PlayerBox lockedTargetBox;
@@ -50,8 +52,12 @@ public final class ScreenMotionState {
     public static float getConfidenceThreshold() { return confidenceThreshold; }
     public static void setConfidenceThreshold(float value) {
         if (!Float.isNaN(value) && !Float.isInfinite(value))
-            confidenceThreshold = Math.max(0.05f, Math.min(0.99f, value));
+            confidenceThreshold = Math.max(0.15f, Math.min(0.99f, value));
     }
+    public static boolean isLongRangeZoomEnabled() { return longRangeZoomEnabled; }
+    public static void setLongRangeZoomEnabled(boolean value) { longRangeZoomEnabled = value; }
+    public static boolean isDetectVehiclesEnabled() { return detectVehiclesEnabled; }
+    public static void setDetectVehiclesEnabled(boolean value) { detectVehiclesEnabled = value; }
     public static boolean isShowFovCircle() { return showFovCircle; }
     public static void setShowFovCircle(boolean value) { showFovCircle = value; }
     public static PlayerBox getLockedTargetBox() { return lockedTargetBox; }
@@ -149,18 +155,21 @@ public final class ScreenMotionState {
     }
 
     public static final class PlayerBox {
-        public final float left;
-        public final float top;
-        public final float right;
-        public final float bottom;
-        public final float confidence;
+        public final float left, top, right, bottom, confidence;
+        public final String category;
+        public final boolean isMoving, isLongRangeZoom;
 
         public PlayerBox(float left, float top, float right, float bottom, float confidence) {
-            this.left = clamp(left);
-            this.top = clamp(top);
-            this.right = clamp(right);
-            this.bottom = clamp(bottom);
+            this(left, top, right, bottom, confidence, "PERSON", false, false);
+        }
+
+        public PlayerBox(float left, float top, float right, float bottom, float confidence,
+                         String category, boolean isMoving, boolean isLongRangeZoom) {
+            this.left = clamp(left); this.top = clamp(top);
+            this.right = clamp(right); this.bottom = clamp(bottom);
             this.confidence = clamp(confidence);
+            this.category = "VEHICLE".equalsIgnoreCase(category) ? "VEHICLE" : "PERSON";
+            this.isMoving = isMoving; this.isLongRangeZoom = isLongRangeZoom;
         }
 
         private static float clamp(float value) {
