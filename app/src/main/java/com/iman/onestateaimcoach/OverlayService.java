@@ -778,7 +778,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             labelPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
             fovPaint.setStyle(Paint.Style.STROKE);
-            fovPaint.setStrokeWidth(dp(1.6f));
+            fovPaint.setStrokeWidth(dp(2));
             tickPaint.setStyle(Paint.Style.STROKE);
             tickPaint.setStrokeWidth(dp(2));
             reticlePaint.setStyle(Paint.Style.STROKE);
@@ -793,7 +793,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             hudTextPaint.setTextSize(dp(10));
             hudTextPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
-            edgePaint.setStyle(Paint.Style.STROKE);
+            edgePaint.setStyle(Paint.Style.FILL);
             edgePaint.setStrokeWidth(dp(5));
             lockedFillPaint.setStyle(Paint.Style.FILL);
             setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -872,7 +872,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     Paint dashed=new Paint(Paint.ANTI_ALIAS_FLAG);
                     dashed.setColor(Color.rgb(0,235,255));
                     dashed.setStyle(Paint.Style.STROKE);
-                    dashed.setStrokeWidth(dp(1.2f));
+                    dashed.setStrokeWidth(dp(1));
                     dashed.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(5),dp(4)},0));
                     canvas.drawLine(tx,ty,lx,ly,dashed);
                     leadPaint.setColor(Color.rgb(0,235,255));
