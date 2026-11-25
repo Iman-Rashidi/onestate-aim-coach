@@ -831,7 +831,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     Paint leadPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
                     leadPaint.setColor(Color.rgb(0, 235, 255));
                     leadPaint.setStyle(Paint.Style.STROKE);
-                    leadPaint.setStrokeWidth(dp(1.5f));
+                    leadPaint.setStrokeWidth(dp(1));
                     leadPaint.setPathEffect(new android.graphics.DashPathEffect(
                             new float[] {dp(5), dp(4)}, 0f));
                     float leadX = lead.x * width, leadY = lead.y * height;
