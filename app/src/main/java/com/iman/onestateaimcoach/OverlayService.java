@@ -876,8 +876,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     dashed.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(5),dp(4)},0));
                     canvas.drawLine(tx,ty,lx,ly,dashed);
                     leadPaint.setColor(Color.rgb(0,235,255));
-                    canvas.drawCircle(lx,ly,dp(4),leadPaint);
-                    canvas.drawCircle(lx,ly,dp(7),dashed);
+                    int pulseRadius=3+(int)((System.currentTimeMillis()/180L)%3L);
+                    canvas.drawCircle(lx,ly,dp(pulseRadius),leadPaint);
+                    canvas.drawCircle(lx,ly,dp(pulseRadius+3),dashed);
                 }
             }
 
@@ -887,19 +888,20 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
         private void drawCornerBrackets(Canvas canvas,RectF r,int color,boolean locked){
             bracketPaint.setColor(color);
-            float len=Math.max(dp(7),Math.min(r.width(),r.height())*0.22f);
+            float horizontal=Math.max(dp(7),r.width()*0.22f);
+            float vertical=Math.max(dp(7),r.height()*0.22f);
             if(locked){
                 lockedFillPaint.setColor(Color.argb(24,0,255,136));
                 canvas.drawRoundRect(r,dp(4),dp(4),lockedFillPaint);
             }
-            canvas.drawLine(r.left,r.top+len,r.left,r.top,bracketPaint);
-            canvas.drawLine(r.left,r.top,r.left+len,r.top,bracketPaint);
-            canvas.drawLine(r.right-len,r.top,r.right,r.top,bracketPaint);
-            canvas.drawLine(r.right,r.top,r.right,r.top+len,bracketPaint);
-            canvas.drawLine(r.left,r.bottom-len,r.left,r.bottom,bracketPaint);
-            canvas.drawLine(r.left,r.bottom,r.left+len,r.bottom,bracketPaint);
-            canvas.drawLine(r.right-len,r.bottom,r.right,r.bottom,bracketPaint);
-            canvas.drawLine(r.right,r.bottom-len,r.right,r.bottom,bracketPaint);
+            canvas.drawLine(r.left,r.top+vertical,r.left,r.top,bracketPaint);
+            canvas.drawLine(r.left,r.top,r.left+horizontal,r.top,bracketPaint);
+            canvas.drawLine(r.right-horizontal,r.top,r.right,r.top,bracketPaint);
+            canvas.drawLine(r.right,r.top,r.right,r.top+vertical,bracketPaint);
+            canvas.drawLine(r.left,r.bottom-vertical,r.left,r.bottom,bracketPaint);
+            canvas.drawLine(r.left,r.bottom,r.left+horizontal,r.bottom,bracketPaint);
+            canvas.drawLine(r.right-horizontal,r.bottom,r.right,r.bottom,bracketPaint);
+            canvas.drawLine(r.right,r.bottom-vertical,r.right,r.bottom,bracketPaint);
         }
 
         private void drawTargetTag(Canvas canvas,RectF rect,ScreenMotionState.PlayerBox box,boolean locked){
