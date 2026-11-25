@@ -21,6 +21,9 @@ public final class ScreenMotionState {
     private static volatile boolean showFovCircle = true;
     private static volatile boolean longRangeZoomEnabled = true;
     private static volatile boolean detectVehiclesEnabled = true;
+    private static volatile boolean selfFilterEnabled = true;
+    public static volatile AimMath.Vec2 leadTargetPoint = null;
+    public static volatile boolean isOnTarget = false;
     public static volatile float visionFps = 0f;
     public static volatile long inferenceLatencyMs = 0L;
     private static volatile PlayerBox lockedTargetBox;
@@ -58,6 +61,8 @@ public final class ScreenMotionState {
     public static void setLongRangeZoomEnabled(boolean value) { longRangeZoomEnabled = value; }
     public static boolean isDetectVehiclesEnabled() { return detectVehiclesEnabled; }
     public static void setDetectVehiclesEnabled(boolean value) { detectVehiclesEnabled = value; }
+    public static boolean isSelfFilterEnabled() { return selfFilterEnabled; }
+    public static void setSelfFilterEnabled(boolean value) { selfFilterEnabled = value; }
     public static boolean isShowFovCircle() { return showFovCircle; }
     public static void setShowFovCircle(boolean value) { showFovCircle = value; }
     public static PlayerBox getLockedTargetBox() { return lockedTargetBox; }
