@@ -87,6 +87,37 @@ public final class AimMath {
                 clamp01(targetPoint.y + safeVy * safeFactor));
     }
 
+    /** Classifies apparent target range from normalized detection-box height. */
+    public static String classifyRange(float boxWidth, float boxHeight) {
+        if (!isFinite(boxWidth) || !isFinite(boxHeight)
+                || boxWidth <= 0f || boxHeight <= 0f) return "FAR";
+        if (boxHeight >= 0.24f) return "CLOSE";
+        if (boxHeight >= 0.10f) return "MID";
+        return "FAR";
+    }
+
+    public static final int PERIPHERAL_NONE = 0;
+    public static final int PERIPHERAL_LEFT = 1;
+    public static final int PERIPHERAL_RIGHT = 1 << 1;
+    public static final int PERIPHERAL_TOP = 1 << 2;
+    public static final int PERIPHERAL_BOTTOM = 1 << 3;
+
+    /**
+     * Returns the dominant screen-edge direction for a target outside a
+     * center-origin FOV radius. Coordinates and radius use normalized units.
+     */
+    public static int computePeripheralDirection(float targetX, float targetY, float fovRadius) {
+        if (!isFinite(targetX) || !isFinite(targetY) || !isFinite(fovRadius)
+                || fovRadius < 0f) return PERIPHERAL_NONE;
+        float dx = targetX - 0.5f;
+        float dy = targetY - 0.5f;
+        if ((float) Math.hypot(dx, dy) <= fovRadius) return PERIPHERAL_NONE;
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            return dx < 0f ? PERIPHERAL_LEFT : PERIPHERAL_RIGHT;
+        }
+        return dy < 0f ? PERIPHERAL_TOP : PERIPHERAL_BOTTOM;
+    }
+
     private static boolean isFinite(float value) {
         return !Float.isNaN(value) && !Float.isInfinite(value);
     }

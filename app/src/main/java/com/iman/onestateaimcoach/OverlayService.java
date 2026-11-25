@@ -71,6 +71,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private CheckBox longRangeToggle;
     private CheckBox vehiclesToggle;
     private CheckBox selfFilterToggle;
+    private CheckBox edgeAlertsToggle;
     private SeekBar confidenceSeekBar;
     private TextView confidenceValueLabel;
     private SeekBar fovSeekBar;
@@ -489,6 +490,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         ScreenMotionState.setLongRangeZoomEnabled(preferences.getBoolean("vision_long_range_zoom", true));
         ScreenMotionState.setDetectVehiclesEnabled(preferences.getBoolean("vision_detect_vehicles", true));
         ScreenMotionState.setSelfFilterEnabled(preferences.getBoolean("vision_self_filter", true));
+        ScreenMotionState.setEdgeAlertsEnabled(preferences.getBoolean("vision_edge_alerts", true));
+        ScreenMotionState.setCooldownEndTimeMs(preferences.getLong("vision_cooldown_end_ms", 0L));
         ScreenMotionState.setConfidenceThreshold(preferences.getFloat("vision_confidence", 0.26f));
     }
 
@@ -519,6 +522,21 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         selfFilterToggle.setTextColor(Color.WHITE);
         selfFilterToggle.setChecked(ScreenMotionState.isSelfFilterEnabled());
         group.addView(selfFilterToggle);
+        edgeAlertsToggle = new CheckBox(this);
+        edgeAlertsToggle.setTextColor(Color.WHITE);
+        edgeAlertsToggle.setChecked(ScreenMotionState.isEdgeAlertsEnabled());
+        group.addView(edgeAlertsToggle);
+        TextView cooldownAction = label("Start 15s Gear / Med Timer", 12, Color.rgb(0, 255, 136), true);
+        cooldownAction.setGravity(Gravity.CENTER);
+        cooldownAction.setPadding(dp(8), dp(8), dp(8), dp(8));
+        cooldownAction.setBackground(roundedBackground(Color.argb(190, 15, 40, 49), Color.rgb(0, 190, 150)));
+        cooldownAction.setOnClickListener(v -> {
+            long end = System.currentTimeMillis() + 15000L;
+            ScreenMotionState.setCooldownEndTimeMs(end);
+            preferences.edit().putLong("vision_cooldown_end_ms", end).apply();
+            if (detectionView != null) detectionView.invalidate();
+        });
+        group.addView(cooldownAction);
         fovValueLabel = label("", 10, Color.LTGRAY, true);
         group.addView(fovValueLabel);
         fovSeekBar = new SeekBar(this);
@@ -567,6 +585,13 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             preferences.edit().putBoolean("vision_self_filter", checked).apply();
             updateVisionControlLabels();
         });
+        edgeAlertsToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setEdgeAlertsEnabled(checked);
+            preferences.edit().putBoolean("vision_edge_alerts", checked).apply();
+            if (!checked) ScreenMotionState.setPeripheralAlertMask(0);
+            updateVisionControlLabels();
+            if (detectionView != null) detectionView.invalidate();
+        });
         confidenceSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float value = (15 + progress) / 100f;
@@ -614,6 +639,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         if (vehiclesToggle != null) vehiclesToggle.setText(ScreenMotionState.isDetectVehiclesEnabled() ? "Vehicles: ON" : "Vehicles: OFF");
         if (selfFilterToggle != null) selfFilterToggle.setText(ScreenMotionState.isSelfFilterEnabled()
                 ? "Self-Filter (3rd-Person): ON" : "Self-Filter (3rd-Person): OFF");
+        if (edgeAlertsToggle != null) edgeAlertsToggle.setText(ScreenMotionState.isEdgeAlertsEnabled()
+                ? "Edge Threat Alerts: ON" : "Edge Threat Alerts: OFF");
         if (confidenceValueLabel != null) confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", Math.round(ScreenMotionState.getConfidenceThreshold() * 100f)));
         if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%",
                 Math.round(ScreenMotionState.getFovRadius() * 100f)));
@@ -727,149 +754,197 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     }
 
     private final class DetectionDrawingView extends View {
-        private final Paint boxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bracketPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint aimGuidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint aimCenterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint fovPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint lockedBoxPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint tickPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint reticlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint guidancePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint leadPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint hudBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint hudBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint hudTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint targetPointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint lockedFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         DetectionDrawingView() {
             super(OverlayService.this);
-            boxPaint.setColor(Color.rgb(255, 70, 70));
-            boxPaint.setStyle(Paint.Style.STROKE);
-            boxPaint.setStrokeWidth(dp(2));
+            bracketPaint.setStyle(Paint.Style.STROKE);
+            bracketPaint.setStrokeWidth(dp(2));
+            bracketPaint.setStrokeCap(Paint.Cap.SQUARE);
             labelPaint.setColor(Color.WHITE);
-            labelPaint.setTextSize(dp(11));
+            labelPaint.setTextSize(dp(10));
             labelPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
-            aimGuidePaint.setColor(Color.rgb(70, 220, 190));
-            aimGuidePaint.setStyle(Paint.Style.STROKE);
-            aimGuidePaint.setStrokeWidth(dp(2));
-            aimCenterPaint.setColor(Color.rgb(70, 220, 190));
-            aimCenterPaint.setStyle(Paint.Style.STROKE);
-            aimCenterPaint.setStrokeWidth(dp(2));
             fovPaint.setStyle(Paint.Style.STROKE);
-            fovPaint.setStrokeWidth(dp(2));
-            lockedBoxPaint.setColor(Color.rgb(70, 235, 145));
-            lockedBoxPaint.setStyle(Paint.Style.STROKE);
-            lockedBoxPaint.setStrokeWidth(dp(3));
-            hudBackgroundPaint.setColor(Color.argb(205, 12, 20, 31));
+            fovPaint.setStrokeWidth(dp(1.6f));
+            tickPaint.setStyle(Paint.Style.STROKE);
+            tickPaint.setStrokeWidth(dp(2));
+            reticlePaint.setStyle(Paint.Style.STROKE);
+            reticlePaint.setStrokeWidth(dp(1.8f));
+            guidancePaint.setStyle(Paint.Style.STROKE);
+            guidancePaint.setStrokeWidth(dp(1.4f));
+            leadPaint.setStyle(Paint.Style.FILL);
+            hudBackgroundPaint.setColor(Color.argb(204, 17, 22, 29));
+            hudBorderPaint.setStyle(Paint.Style.STROKE);
+            hudBorderPaint.setStrokeWidth(dp(1));
             hudTextPaint.setColor(Color.WHITE);
-            hudTextPaint.setTextSize(dp(11));
+            hudTextPaint.setTextSize(dp(10));
             hudTextPaint.setTypeface(android.graphics.Typeface.create(
                     "sans-serif-medium", android.graphics.Typeface.BOLD));
-            targetPointPaint.setColor(Color.WHITE);
-            targetPointPaint.setStyle(Paint.Style.STROKE);
-            targetPointPaint.setStrokeWidth(dp(2));
+            edgePaint.setStyle(Paint.Style.STROKE);
+            edgePaint.setStrokeWidth(dp(5));
+            lockedFillPaint.setStyle(Paint.Style.FILL);
             setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             float width = getWidth(), height = getHeight();
             if (width <= 0f || height <= 0f) return;
-            float centerX = width * 0.5f, centerY = height * 0.5f;
+            float cx = width * 0.5f, cy = height * 0.5f;
+            float minDimension = Math.min(width, height);
             ScreenMotionState.PlayerBox[] boxes = ScreenMotionState.detectedPlayers;
             ScreenMotionState.PlayerBox locked = ScreenMotionState.getLockedTargetBox();
+            int accent = ScreenMotionState.isOnTarget ? Color.rgb(0,255,102) : Color.rgb(0,255,136);
 
             if (ScreenMotionState.isLongRangeZoomEnabled()) {
                 Paint zone = new Paint(Paint.ANTI_ALIAS_FLAG);
-                zone.setColor(Color.argb(105, 255, 205, 90)); zone.setStyle(Paint.Style.STROKE);
-                zone.setStrokeWidth(dp(1)); zone.setPathEffect(new android.graphics.DashPathEffect(new float[] {dp(7),dp(5)},0));
+                zone.setColor(Color.argb(78, 255, 190, 70));
+                zone.setStyle(Paint.Style.STROKE);
+                zone.setStrokeWidth(dp(1));
+                zone.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(6),dp(5)},0));
                 float cw=width*0.38f,ch=height*0.38f;
-                canvas.drawRect((width-cw)*0.5f,(height-ch)*0.5f,(width+cw)*0.5f,(height+ch)*0.5f,zone);
+                canvas.drawRect((width-cw)*0.5f,(height-ch)*0.5f,
+                        (width+cw)*0.5f,(height+ch)*0.5f,zone);
             }
+
             if (ScreenMotionState.isShowFovCircle()) {
-                float radius = ScreenMotionState.getFovRadius() * Math.min(width, height);
-                fovPaint.setColor(ScreenMotionState.isOnTarget
-                        ? Color.rgb(0, 255, 102)
-                        : (locked == null ? Color.argb(190, 70, 205, 235)
-                        : Color.argb(235, 75, 225, 145)));
-                canvas.drawCircle(centerX, centerY, radius, fovPaint);
-            }
-
-            if (boxes != null) {
-                for (ScreenMotionState.PlayerBox box : boxes) {
-                    if (box == null || box == locked) continue;
-                    RectF rect = new RectF(box.left * width, box.top * height,
-                            box.right * width, box.bottom * height);
-                    if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
-                    boxPaint.setColor("VEHICLE".equals(box.category) ? Color.rgb(255,190,55) : Color.rgb(255,92,92));
-                    canvas.drawRoundRect(rect, dp(5), dp(5), boxPaint);
-                    drawBoxLabel(canvas, rect, box, false);
+                float radius=ScreenMotionState.getFovRadius()*minDimension;
+                fovPaint.setColor(ScreenMotionState.isOnTarget ? Color.rgb(0,255,102)
+                        : Color.argb(205,0,210,225));
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,8f,78f,false,fovPaint);
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,102f,78f,false,fovPaint);
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,188f,78f,false,fovPaint);
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,282f,78f,false,fovPaint);
+                tickPaint.setColor(fovPaint.getColor());
+                for(int angle=0;angle<360;angle+=90){
+                    double a=Math.toRadians(angle);
+                    float x1=cx+(float)Math.cos(a)*(radius-dp(5));
+                    float y1=cy+(float)Math.sin(a)*(radius-dp(5));
+                    float x2=cx+(float)Math.cos(a)*(radius+dp(4));
+                    float y2=cy+(float)Math.sin(a)*(radius+dp(4));
+                    canvas.drawLine(x1,y1,x2,y2,tickPaint);
                 }
             }
-            if (locked != null) {
-                RectF rect = new RectF(locked.left * width, locked.top * height,
-                        locked.right * width, locked.bottom * height);
-                lockedBoxPaint.setColor("VEHICLE".equals(locked.category) ? Color.rgb(255,190,55) : Color.rgb(70,235,145));
-                canvas.drawRoundRect(rect, dp(5), dp(5), lockedBoxPaint);
-                drawBoxLabel(canvas, rect, locked, true);
+
+            if(boxes!=null) for(ScreenMotionState.PlayerBox box:boxes){
+                if(box==null||box==locked) continue;
+                RectF rect=new RectF(box.left*width,box.top*height,box.right*width,box.bottom*height);
+                if(rect.width()<dp(8)||rect.height()<dp(12)) continue;
+                int color="VEHICLE".equals(box.category)?Color.rgb(255,187,51):Color.rgb(255,77,77);
+                drawCornerBrackets(canvas,rect,color,false);
+                drawTargetTag(canvas,rect,box,false);
+            }
+            if(locked!=null){
+                RectF rect=new RectF(locked.left*width,locked.top*height,locked.right*width,locked.bottom*height);
+                drawCornerBrackets(canvas,rect,Color.rgb(0,255,136),true);
+                drawTargetTag(canvas,rect,locked,true);
             }
 
-            if (ScreenMotionState.aimGuideActive) {
-                int reticleColor = ScreenMotionState.isOnTarget ? Color.rgb(0, 255, 102) : Color.rgb(70, 220, 190);
-                aimCenterPaint.setColor(reticleColor);
-                float targetX = ScreenMotionState.aimTargetX * width;
-                float targetY = ScreenMotionState.aimTargetY * height;
-                float vectorX = centerX + ScreenMotionState.aimDeltaX * width;
-                float vectorY = centerY + ScreenMotionState.aimDeltaY * height;
-                canvas.drawCircle(centerX, centerY, dp(7), aimCenterPaint);
-                canvas.drawLine(centerX, centerY, vectorX, vectorY, aimGuidePaint);
-                canvas.drawCircle(targetX, targetY, dp(9), aimGuidePaint);
-                canvas.drawLine(targetX - dp(5), targetY, targetX + dp(5), targetY, targetPointPaint);
-                canvas.drawLine(targetX, targetY - dp(5), targetX, targetY + dp(5), targetPointPaint);
-                canvas.drawCircle(targetX, targetY, dp(3), targetPointPaint);
-                AimMath.Vec2 lead = ScreenMotionState.leadTargetPoint;
-                if (locked != null && locked.isMoving && lead != null) {
-                    Paint leadPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                    leadPaint.setColor(Color.rgb(0, 235, 255));
-                    leadPaint.setStyle(Paint.Style.STROKE);
-                    leadPaint.setStrokeWidth(dp(1));
-                    leadPaint.setPathEffect(new android.graphics.DashPathEffect(
-                            new float[] {dp(5), dp(4)}, 0f));
-                    float leadX = lead.x * width, leadY = lead.y * height;
-                    canvas.drawLine(targetX, targetY, leadX, leadY, leadPaint);
-                    leadPaint.setPathEffect(null);
-                    leadPaint.setStyle(Paint.Style.FILL);
-                    canvas.drawCircle(leadX, leadY, dp(4), leadPaint);
+            reticlePaint.setColor(ScreenMotionState.isOnTarget?Color.rgb(0,255,102):Color.rgb(0,220,235));
+            canvas.drawCircle(cx,cy,dp(8),reticlePaint);
+            canvas.drawLine(cx-dp(14),cy,cx-dp(10),cy,reticlePaint);
+            canvas.drawLine(cx+dp(10),cy,cx+dp(14),cy,reticlePaint);
+            canvas.drawLine(cx,cy-dp(14),cx,cy-dp(10),reticlePaint);
+            canvas.drawLine(cx,cy+dp(10),cx,cy+dp(14),reticlePaint);
+
+            if(ScreenMotionState.aimGuideActive){
+                float tx=ScreenMotionState.aimTargetX*width,ty=ScreenMotionState.aimTargetY*height;
+                float vx=cx+ScreenMotionState.aimDeltaX*width,vy=cy+ScreenMotionState.aimDeltaY*height;
+                guidancePaint.setColor(Color.argb(220,0,220,235));
+                canvas.drawLine(cx,cy,vx,vy,guidancePaint);
+                canvas.drawCircle(tx,ty,dp(7),guidancePaint);
+                AimMath.Vec2 lead=ScreenMotionState.leadTargetPoint;
+                if(locked!=null&&locked.isMoving&&lead!=null){
+                    float lx=lead.x*width,ly=lead.y*height;
+                    Paint dashed=new Paint(Paint.ANTI_ALIAS_FLAG);
+                    dashed.setColor(Color.rgb(0,235,255));
+                    dashed.setStyle(Paint.Style.STROKE);
+                    dashed.setStrokeWidth(dp(1.2f));
+                    dashed.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(5),dp(4)},0));
+                    canvas.drawLine(tx,ty,lx,ly,dashed);
+                    leadPaint.setColor(Color.rgb(0,235,255));
+                    canvas.drawCircle(lx,ly,dp(4),leadPaint);
+                    canvas.drawCircle(lx,ly,dp(7),dashed);
                 }
             }
-            if (ScreenMotionState.isOnTarget && !ScreenMotionState.aimGuideActive) {
-                aimCenterPaint.setColor(Color.rgb(0, 255, 102));
-                canvas.drawCircle(centerX, centerY, dp(7), aimCenterPaint);
-            }
 
-            String mode = ScreenMotionState.isHeadZoneEnabled() ? "HEAD" : "BODY";
-            String filter = ScreenMotionState.isSelfFilterEnabled() ? " | SELF-FILTER: ON" : "";
-            String hud = String.format(Locale.US, "%.1f FPS | %d ms | %s%s",
-                    ScreenMotionState.visionFps, ScreenMotionState.inferenceLatencyMs, mode, filter);
-            float hudWidth = hudTextPaint.measureText(hud) + dp(16);
-            RectF hudRect = new RectF(Math.max(dp(6), width - hudWidth - dp(8)),
-                    dp(8), width - dp(8), dp(34));
-            canvas.drawRoundRect(hudRect, dp(7), dp(7), hudBackgroundPaint);
-            canvas.drawText(hud, hudRect.left + dp(8), hudRect.top + dp(18), hudTextPaint);
+            drawPeripheralAlerts(canvas,width,height);
+            drawStatusHud(canvas,width,height);
         }
 
-        private void drawBoxLabel(Canvas canvas, RectF rect, ScreenMotionState.PlayerBox box, boolean isLocked) {
-            String type = "VEHICLE".equals(box.category) ? "CAR" : "PLAYER";
-            if (box.isLongRangeZoom) type = "FAR";
-            String caption = String.format(Locale.US, "%s %d%%%s", type,
-                    Math.round(box.confidence * 100f), box.isMoving ? " [MOV]" : "");
-            float textWidth = labelPaint.measureText(caption);
-            float labelTop = Math.max(dp(20), rect.top - dp(4));
-            RectF bg = new RectF(rect.left, labelTop - dp(18), rect.left + textWidth + dp(10), labelTop);
-            int color = "VEHICLE".equals(box.category) ? Color.argb(225,145,100,18) : Color.argb(220,145,28,28);
-            if (isLocked) color = Color.argb(225,20,115,65);
-            labelBackground.setColor(color);
-            canvas.drawRoundRect(bg, dp(4), dp(4), labelBackground);
-            canvas.drawText(caption, rect.left + dp(5), labelTop - dp(5), labelPaint);
+        private void drawCornerBrackets(Canvas canvas,RectF r,int color,boolean locked){
+            bracketPaint.setColor(color);
+            float len=Math.max(dp(7),Math.min(r.width(),r.height())*0.22f);
+            if(locked){
+                lockedFillPaint.setColor(Color.argb(24,0,255,136));
+                canvas.drawRoundRect(r,dp(4),dp(4),lockedFillPaint);
+            }
+            canvas.drawLine(r.left,r.top+len,r.left,r.top,bracketPaint);
+            canvas.drawLine(r.left,r.top,r.left+len,r.top,bracketPaint);
+            canvas.drawLine(r.right-len,r.top,r.right,r.top,bracketPaint);
+            canvas.drawLine(r.right,r.top,r.right,r.top+len,bracketPaint);
+            canvas.drawLine(r.left,r.bottom-len,r.left,r.bottom,bracketPaint);
+            canvas.drawLine(r.left,r.bottom,r.left+len,r.bottom,bracketPaint);
+            canvas.drawLine(r.right-len,r.bottom,r.right,r.bottom,bracketPaint);
+            canvas.drawLine(r.right,r.bottom-len,r.right,r.bottom,bracketPaint);
+        }
+
+        private void drawTargetTag(Canvas canvas,RectF rect,ScreenMotionState.PlayerBox box,boolean locked){
+            String range=AimMath.classifyRange(rect.width()/getWidth(),rect.height()/getHeight());
+            String text=locked?"[LOCK | "+range+" | "+Math.round(box.confidence*100f)+"%]"
+                    :("VEHICLE".equals(box.category)?"[VEH"+(box.isMoving?" | MOV":"")+"]"
+                    :"[PERSON | "+range+"]");
+            float tw=labelPaint.measureText(text)+dp(12);
+            float top=Math.max(dp(22),rect.top-dp(3));
+            RectF bg=new RectF(rect.left,top-dp(19),rect.left+tw,top);
+            int fill=locked?Color.argb(224,0,91,72):("VEHICLE".equals(box.category)
+                    ?Color.argb(225,130,83,12):Color.argb(220,125,32,38));
+            labelBackground.setColor(fill);
+            canvas.drawRoundRect(bg,dp(4),dp(4),labelBackground);
+            canvas.drawText(text,bg.left+dp(6),bg.bottom-dp(5),labelPaint);
+        }
+
+        private void drawPeripheralAlerts(Canvas canvas,float width,float height){
+            if(!ScreenMotionState.isEdgeAlertsEnabled()) return;
+            int mask=ScreenMotionState.getPeripheralAlertMask();
+            if(mask==0) return;
+            edgePaint.setColor(Color.argb(190,255,72,65));
+            if((mask&AimMath.PERIPHERAL_LEFT)!=0)
+                canvas.drawRoundRect(new RectF(dp(2),height*0.34f,dp(7),height*0.66f),dp(3),dp(3),edgePaint);
+            if((mask&AimMath.PERIPHERAL_RIGHT)!=0)
+                canvas.drawRoundRect(new RectF(width-dp(7),height*0.34f,width-dp(2),height*0.66f),dp(3),dp(3),edgePaint);
+            if((mask&AimMath.PERIPHERAL_TOP)!=0)
+                canvas.drawRoundRect(new RectF(width*0.34f,dp(2),width*0.66f,dp(7)),dp(3),dp(3),edgePaint);
+            if((mask&AimMath.PERIPHERAL_BOTTOM)!=0)
+                canvas.drawRoundRect(new RectF(width*0.34f,height-dp(7),width*0.66f,height-dp(2)),dp(3),dp(3),edgePaint);
+        }
+
+        private void drawStatusHud(Canvas canvas,float width,float height){
+            long remaining=Math.max(0L,ScreenMotionState.getCooldownEndTimeMs()-System.currentTimeMillis());
+            String cooldown=remaining>0L?" | CD: "+((remaining+999L)/1000L)+"s":" | GEAR READY";
+            String hud=String.format(Locale.US,"FPS %.1f | %d MS | ZONE: %s%s",
+                    ScreenMotionState.getVisionFps(),ScreenMotionState.getInferenceLatencyMs(),
+                    ScreenMotionState.isHeadZoneEnabled()?"HEAD":"BODY",cooldown);
+            float textWidth=hudTextPaint.measureText(hud);
+            float pillWidth=Math.min(width-dp(16),textWidth+dp(20));
+            RectF pill=new RectF(dp(8),dp(8),dp(8)+pillWidth,dp(36));
+            canvas.drawRoundRect(pill,dp(9),dp(9),hudBackgroundPaint);
+            hudBorderPaint.setColor(Color.argb(180,90,135,158));
+            canvas.drawRoundRect(pill,dp(9),dp(9),hudBorderPaint);
+            canvas.drawText(hud,pill.left+dp(10),pill.top+dp(18),hudTextPaint);
         }
     }
 

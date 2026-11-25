@@ -150,6 +150,7 @@ public class ScreenAnalysisService extends Service {
                     }
                     List<ScreenMotionState.PlayerBox> boxes = nms(candidates);
                     ScreenMotionState.detectedPlayers = boxes.toArray(new ScreenMotionState.PlayerBox[0]);
+                    updatePeripheralAlerts(boxes);
                     updateAimGuide(boxes);
                     ScreenMotionState.level = boxes.isEmpty() ? "هدف قابل تشخیص نیست" : boxes.size() + " هدف بصری";
                 } catch (Exception ignored) { ScreenMotionState.level = "خطا در تحلیل فریم"; }
@@ -235,6 +236,22 @@ public class ScreenAnalysisService extends Service {
         int x1=Math.max(0,Math.min(GRID-1,(int)(right*GRID))), y1=Math.max(0,Math.min(GRID-1,(int)(bottom*GRID)));
         for (int y=y0;y<=y1;y++) for (int x=x0;x<=x1;x++) if (movingGrid[y*GRID+x]) return true;
         return false;
+    }
+
+    private void updatePeripheralAlerts(List<ScreenMotionState.PlayerBox> boxes) {
+        if (!ScreenMotionState.isEdgeAlertsEnabled()) {
+            ScreenMotionState.setPeripheralAlertMask(0);
+            return;
+        }
+        int mask = 0;
+        float radius = ScreenMotionState.getFovRadius();
+        for (ScreenMotionState.PlayerBox box : boxes) {
+            if (box == null) continue;
+            float centerX = (box.left + box.right) * 0.5f;
+            float centerY = (box.top + box.bottom) * 0.5f;
+            mask |= AimMath.computePeripheralDirection(centerX, centerY, radius);
+        }
+        ScreenMotionState.setPeripheralAlertMask(mask);
     }
 
     private void updateMotionGrid(ByteBuffer buffer, int rowStride, int pixelStride, int width, int height) {

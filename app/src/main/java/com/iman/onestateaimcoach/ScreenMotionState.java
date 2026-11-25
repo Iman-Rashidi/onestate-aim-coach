@@ -22,6 +22,9 @@ public final class ScreenMotionState {
     private static volatile boolean longRangeZoomEnabled = true;
     private static volatile boolean detectVehiclesEnabled = true;
     private static volatile boolean selfFilterEnabled = true;
+    private static volatile int peripheralAlertMask = 0;
+    private static volatile boolean edgeAlertsEnabled = true;
+    private static volatile long cooldownEndTimeMs = 0L;
     public static volatile AimMath.Vec2 leadTargetPoint = null;
     public static volatile boolean isOnTarget = false;
     public static volatile float visionFps = 0f;
@@ -63,6 +66,12 @@ public final class ScreenMotionState {
     public static void setDetectVehiclesEnabled(boolean value) { detectVehiclesEnabled = value; }
     public static boolean isSelfFilterEnabled() { return selfFilterEnabled; }
     public static void setSelfFilterEnabled(boolean value) { selfFilterEnabled = value; }
+    public static int getPeripheralAlertMask() { return peripheralAlertMask; }
+    public static void setPeripheralAlertMask(int value) { peripheralAlertMask = value & 0x0F; }
+    public static boolean isEdgeAlertsEnabled() { return edgeAlertsEnabled; }
+    public static void setEdgeAlertsEnabled(boolean value) { edgeAlertsEnabled = value; }
+    public static long getCooldownEndTimeMs() { return cooldownEndTimeMs; }
+    public static void setCooldownEndTimeMs(long value) { cooldownEndTimeMs = Math.max(0L, value); }
     public static boolean isShowFovCircle() { return showFovCircle; }
     public static void setShowFovCircle(boolean value) { showFovCircle = value; }
     public static PlayerBox getLockedTargetBox() { return lockedTargetBox; }

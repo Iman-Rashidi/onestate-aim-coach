@@ -65,6 +65,28 @@ public class AimMathTest {
         assertEquals(0.48f, lead.y, 0.0001f);
     }
 
+    @Test public void classifiesRangeFromNormalizedBoxHeight() {
+        assertEquals("CLOSE", AimMath.classifyRange(0.18f, 0.24f));
+        assertEquals("MID", AimMath.classifyRange(0.08f, 0.10f));
+        assertEquals("FAR", AimMath.classifyRange(0.04f, 0.09f));
+    }
+
+    @Test public void peripheralDirectionReturnsNoneInsideFov() {
+        assertEquals(AimMath.PERIPHERAL_NONE,
+                AimMath.computePeripheralDirection(0.52f, 0.52f, 0.20f));
+    }
+
+    @Test public void peripheralDirectionIdentifiesEachScreenEdge() {
+        assertEquals(AimMath.PERIPHERAL_LEFT,
+                AimMath.computePeripheralDirection(0.05f, 0.50f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_RIGHT,
+                AimMath.computePeripheralDirection(0.95f, 0.50f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_TOP,
+                AimMath.computePeripheralDirection(0.50f, 0.05f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_BOTTOM,
+                AimMath.computePeripheralDirection(0.50f, 0.95f, 0.20f));
+    }
+
     @Test public void clampsLeadPointToNormalizedScreenBounds() {
         AimMath.Vec2 lead = AimMath.computeLeadPoint(new AimMath.Vec2(0.98f, 0.02f),
                 0.10f, -0.10f, 2f);
