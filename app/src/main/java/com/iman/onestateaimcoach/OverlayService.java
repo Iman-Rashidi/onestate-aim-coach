@@ -841,6 +841,10 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     canvas.drawCircle(leadX, leadY, dp(4), leadPaint);
                 }
             }
+            if (ScreenMotionState.isOnTarget && !ScreenMotionState.aimGuideActive) {
+                aimCenterPaint.setColor(Color.rgb(0, 255, 102));
+                canvas.drawCircle(centerX, centerY, dp(7), aimCenterPaint);
+            }
 
             String mode = ScreenMotionState.isHeadZoneEnabled() ? "HEAD" : "BODY";
             String filter = ScreenMotionState.isSelfFilterEnabled() ? " | SELF-FILTER: ON" : "";
