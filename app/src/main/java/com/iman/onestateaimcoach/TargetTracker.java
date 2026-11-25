@@ -5,6 +5,8 @@ public final class TargetTracker {
     private final int maxLostFrames;
     private ScreenMotionState.PlayerBox locked;
     private int lostFrames;
+    private float velocityX;
+    private float velocityY;
 
     public TargetTracker() { this(3); }
     public TargetTracker(int maxLostFrames) { this.maxLostFrames = Math.max(0, maxLostFrames); }
@@ -16,6 +18,8 @@ public final class TargetTracker {
         if (locked != null) {
             ScreenMotionState.PlayerBox match = findMatch(detections, locked, radius);
             if (match != null) {
+                velocityX = centerX(match) - centerX(locked);
+                velocityY = centerY(match) - centerY(locked);
                 locked = match;
                 lostFrames = 0;
                 return match;
@@ -26,12 +30,22 @@ public final class TargetTracker {
             lostFrames = 0;
         }
         locked = findClosestInsideFov(detections, radius);
+        velocityX = 0f;
+        velocityY = 0f;
         return locked;
     }
 
     public synchronized ScreenMotionState.PlayerBox getLockedTarget() { return locked; }
     public synchronized int getLostFrames() { return lostFrames; }
-    public synchronized void reset() { locked = null; lostFrames = 0; }
+    /** Normalized target-center displacement per processed detection frame. */
+    public synchronized float getVelocityX() { return velocityX; }
+    public synchronized float getVelocityY() { return velocityY; }
+    public synchronized void reset() {
+        locked = null;
+        lostFrames = 0;
+        velocityX = 0f;
+        velocityY = 0f;
+    }
 
     private ScreenMotionState.PlayerBox findMatch(
             ScreenMotionState.PlayerBox[] detections,
