@@ -22,6 +22,7 @@ import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.task.core.BaseOptions;
 import org.tensorflow.lite.support.label.Category;
 import org.tensorflow.lite.task.vision.detector.Detection;
 import org.tensorflow.lite.task.vision.detector.ObjectDetector;
@@ -36,8 +37,8 @@ public class ScreenAnalysisService extends Service {
     private static final int NOTIFICATION_ID = 2;
     private static final String EXTRA_RESULT = "projection_result";
     private static final String EXTRA_DATA = "projection_data";
-    private static final long MIN_FRAME_INTERVAL_MS = 110;
-    private static final long MIN_DETECTION_INTERVAL_MS = 350;
+    private static final long MIN_FRAME_INTERVAL_MS = 66;
+    private static final long MIN_DETECTION_INTERVAL_MS = 66;
     private static final float NMS_IOU_THRESHOLD = 0.45f;
     private static final int GRID = 8;
     private static final int MAX_DETECTIONS = 30;
@@ -96,7 +97,9 @@ public class ScreenAnalysisService extends Service {
 
     private void loadDetector() {
         try {
+            BaseOptions baseOptions = BaseOptions.builder().setNumThreads(4).build();
             ObjectDetector.ObjectDetectorOptions options = ObjectDetector.ObjectDetectorOptions.builder()
+                    .setBaseOptions(baseOptions)
                     .setMaxResults(MAX_DETECTIONS).setScoreThreshold(0.0f).build();
             objectDetector = ObjectDetector.createFromFileAndOptions(
                     getApplicationContext(), "efficientdet-lite0.tflite", options);
@@ -107,7 +110,8 @@ public class ScreenAnalysisService extends Service {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         DisplayMetrics metrics = new DisplayMetrics();
         wm.getDefaultDisplay().getRealMetrics(metrics);
-        int width = Math.max(320, metrics.widthPixels), height = Math.max(320, metrics.heightPixels);
+        int width = Math.max(320, metrics.widthPixels * 2 / 3);
+        int height = Math.max(320, metrics.heightPixels * 2 / 3);
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = null;

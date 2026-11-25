@@ -93,8 +93,16 @@ public final class AimMath {
         if (width <= 0f || height <= 0f) return false;
         float centerX = (left + right) * 0.5f;
         float centerY = (top + bottom) * 0.5f;
-        return centerX >= 0.28f && centerX <= 0.56f
-                && centerY > 0.52f && height > 0.25f;
+        return bottom >= 0.76f && height >= 0.42f
+                && centerX >= 0.18f && centerX <= 0.55f;
+    }
+
+    /** Formats concise Persian guidance for the currently locked visual detection. */
+    public static String formatTacticalGuidance(String category, boolean moving,
+            boolean close, boolean headZone) {
+        if ("VEHICLE".equals(category)) return moving ? "خودرو متحرک" : "خودرو";
+        if (close) return "هدف نزدیک • به راست بکشید";
+        return headZone ? "روی سر • شلیک کنید" : "روی بدن • شلیک کنید";
     }
 
     /** Projects a target point forward by a configurable number of frame-velocity units. */

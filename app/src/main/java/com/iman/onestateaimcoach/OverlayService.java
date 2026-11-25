@@ -39,6 +39,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.SeekBar;
+import android.widget.ScrollView;
 
 import java.util.Locale;
 
@@ -53,6 +54,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private WindowManager.LayoutParams drawingParams;
     private FrameLayout panel;
     private LinearLayout expandedPanel;
+    private LinearLayout panelContent;
+    private ScopeLensView scopeLensView;
+    private WindowManager.LayoutParams scopeLensParams;
+    private float scopeLensDownX, scopeLensDownY;
+    private int scopeLensStartX, scopeLensStartY;
     private TextView bubble;
     private GradientDrawable bubbleBackground;
     private LinearLayout details;
@@ -97,6 +103,13 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private SharedPreferences preferences;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable scopeUpdater = new Runnable() {
+        @Override public void run() {
+            updateScopeLensVisibility();
+            if (scopeLensView != null && scopeLensView.getVisibility() == View.VISIBLE) scopeLensView.invalidate();
+            if (panel != null) mainHandler.postDelayed(this, 66L);
+        }
+    };
     private final Runnable metricsUpdater = new Runnable() {
         @Override public void run() {
             updateValues();
@@ -170,7 +183,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
         expandedPanel = new LinearLayout(this);
         expandedPanel.setOrientation(LinearLayout.VERTICAL);
-        expandedPanel.setPadding(dp(12), dp(9), dp(12), dp(10));
+        expandedPanel.setPadding(dp(6), dp(6), dp(6), dp(6));
         GradientDrawable expandedBackground = new GradientDrawable();
         expandedBackground.setColor(Color.argb(232, 21, 31, 45));
         expandedBackground.setCornerRadius(dp(14));
@@ -186,6 +199,19 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         TextView close = action("×");
         header.addView(close);
         expandedPanel.addView(header);
+
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(false);
+        scrollView.setVerticalScrollBarEnabled(true);
+        panelContent = new LinearLayout(this);
+        panelContent.setOrientation(LinearLayout.VERTICAL);
+        panelContent.setPadding(dp(6), dp(3), dp(6), dp(6));
+        scrollView.addView(panelContent, new ScrollView.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Math.max(dp(180), Math.round(screenHeight() * 0.78f) - dp(42)));
+        expandedPanel.addView(scrollView, scrollParams);
 
         details = new LinearLayout(this);
         details.setOrientation(LinearLayout.VERTICAL);
@@ -203,9 +229,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
-        expandedPanel.addView(details);
-        addTelemetryControls();
+        panelContent.addView(details);
         addVisionControls();
+        addTelemetryControls();
 
         collapse.setOnClickListener(v -> setCompact(true));
         close.setOnClickListener(v -> stopSelf());
@@ -268,9 +294,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 PixelFormat.TRANSLUCENT);
         drawingParams.gravity = Gravity.TOP | Gravity.START;
         windowManager.addView(detectionView, drawingParams);
+        createScopeLensWindow();
 
         updateValues();
         mainHandler.post(metricsUpdater);
+        mainHandler.post(scopeUpdater);
     }
 
     private boolean handleBubbleTouch(View view, MotionEvent event) {
@@ -437,7 +465,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         healthValueInput = decimalInput("0.0");
         healthRow.addView(healthValueInput, new LinearLayout.LayoutParams(dp(104), dp(42)));
         healthGroup.addView(healthRow);
-        expandedPanel.addView(healthGroup);
+        panelContent.addView(healthGroup);
 
         LinearLayout coordinateGroup = telemetryGroup("مختصات محلی (X / Y / Z)");
         coordinatesToggle = new CheckBox(this);
@@ -454,12 +482,12 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         coordinateRow.addView(yValueInput, weightedInputParams());
         coordinateRow.addView(zValueInput, weightedInputParams());
         coordinateGroup.addView(coordinateRow);
-        expandedPanel.addView(coordinateGroup);
+        panelContent.addView(coordinateGroup);
 
         telemetryStatus = label("", 10, Color.rgb(190, 205, 220), false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = dp(4);
-        expandedPanel.addView(telemetryStatus, statusParams);
+        panelContent.addView(telemetryStatus, statusParams);
 
         bindingTelemetry = true;
         healthToggle.setChecked(ScreenMotionState.isHealthSlotEnabled());
@@ -512,7 +540,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         stickyLockToggle.setChecked(ScreenMotionState.isTargetLockEnabled());
         group.addView(stickyLockToggle);
         showFovToggle = new CheckBox(this);
-        showFovToggle.setText("Show FOV Circle");
+        showFovToggle.setText(ScreenMotionState.isShowFovCircle()
+                ? "نمایش دایره FOV: فعال" : "نمایش دایره FOV: غیرفعال");
         showFovToggle.setTextColor(Color.WHITE);
         showFovToggle.setChecked(ScreenMotionState.isShowFovCircle());
         group.addView(showFovToggle);
@@ -532,7 +561,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         edgeAlertsToggle.setTextColor(Color.WHITE);
         edgeAlertsToggle.setChecked(ScreenMotionState.isEdgeAlertsEnabled());
         group.addView(edgeAlertsToggle);
-        TextView cooldownAction = label("Start 15s Gear / Med Timer", 12, Color.rgb(0, 255, 136), true);
+        TextView cooldownAction = label("شروع تایمر ۱۵ ثانیه‌ای", 12, Color.rgb(0, 255, 136), true);
         cooldownAction.setGravity(Gravity.CENTER);
         cooldownAction.setPadding(dp(8), dp(8), dp(8), dp(8));
         cooldownAction.setBackground(roundedBackground(Color.argb(190, 15, 40, 49), Color.rgb(0, 190, 150)));
@@ -571,7 +600,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         confidenceSeekBar.setMax(84);
         confidenceSeekBar.setProgress(Math.round((ScreenMotionState.getConfidenceThreshold() - 0.15f) * 100f));
         group.addView(confidenceSeekBar);
-        expandedPanel.addView(group);
+        panelContent.addView(group);
         updateVisionControlLabels();
 
         headZoneToggle.setOnCheckedChangeListener((button, checked) -> {
@@ -618,7 +647,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float value = (15 + progress) / 100f;
                 ScreenMotionState.setConfidenceThreshold(value);
-                confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", 15 + progress));
+                confidenceValueLabel.setText(String.format(Locale.US, "آستانه تشخیص: %d%%", 15 + progress));
                 if (fromUser) preferences.edit().putFloat("vision_confidence", value).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -633,7 +662,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float radius = (10 + progress) / 100f;
                 ScreenMotionState.setFovRadius(radius);
-                fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%", 10 + progress));
+                fovValueLabel.setText(String.format(Locale.US, "شعاع FOV: %d%%", 10 + progress));
                 if (fromUser) preferences.edit().putFloat("vision_fov_radius", radius).apply();
                 if (detectionView != null) detectionView.invalidate();
             }
@@ -644,7 +673,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float alpha = (10 + progress) / 100f;
                 ScreenMotionState.setSmoothingAlpha(alpha);
-                smoothingValueLabel.setText(String.format(Locale.US, "Smoothing: %d%%", 10 + progress));
+                smoothingValueLabel.setText(String.format(Locale.US, "نرمی خط راهنما: %d%%", 10 + progress));
                 if (fromUser) preferences.edit().putFloat("vision_smoothing", alpha).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -654,8 +683,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private String scopeZoomLabel() {
         float zoom = ScreenMotionState.getScopeZoomLevel();
-        return zoom <= 1.0f ? "Optic Scope: OFF  ·  TAP TO CYCLE"
-                : String.format(Locale.US, "Optic Scope: %.0fX  ·  TAP TO CYCLE", zoom);
+        return zoom <= 1.0f ? "دوربین زوم زنده: خاموش · لمس برای تغییر"
+                : String.format(Locale.US, "دوربین زوم زنده: %.0fX · لمس برای تغییر", zoom);
     }
 
     private void cycleScopeZoom() {
@@ -669,22 +698,23 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private void updateVisionControlLabels() {
         if (headZoneToggle != null) headZoneToggle.setText(
-                ScreenMotionState.isHeadZoneEnabled() ? "Target Zone: HEAD" : "Target Zone: BODY");
+                ScreenMotionState.isHeadZoneEnabled() ? "نقطه هدف: سر (HEAD)" : "نقطه هدف: بدن (BODY)");
         if (stickyLockToggle != null) stickyLockToggle.setText(
-                ScreenMotionState.isTargetLockEnabled() ? "Sticky Lock: ON" : "Sticky Lock: OFF");
-        if (longRangeToggle != null) longRangeToggle.setText(ScreenMotionState.isLongRangeZoomEnabled() ? "Long-Range Zoom: ON" : "Long-Range Zoom: OFF");
-        if (vehiclesToggle != null) vehiclesToggle.setText(ScreenMotionState.isDetectVehiclesEnabled() ? "Vehicles: ON" : "Vehicles: OFF");
+                ScreenMotionState.isTargetLockEnabled() ? "قفل پایدار روی هدف: فعال" : "قفل پایدار روی هدف: غیرفعال");
+        if (longRangeToggle != null) longRangeToggle.setText(ScreenMotionState.isLongRangeZoomEnabled() ? "تحلیل برد دور: فعال" : "تحلیل برد دور: غیرفعال");
+        if (vehiclesToggle != null) vehiclesToggle.setText(ScreenMotionState.isDetectVehiclesEnabled() ? "تشخیص خودرو: فعال" : "تشخیص خودرو: غیرفعال");
         if (selfFilterToggle != null) selfFilterToggle.setText(ScreenMotionState.isSelfFilterEnabled()
-                ? "Self-Filter (3rd-Person): ON" : "Self-Filter (3rd-Person): OFF");
+                ? "حذف کاراکتر خودی: فعال" : "حذف کاراکتر خودی: غیرفعال");
         if (edgeAlertsToggle != null) edgeAlertsToggle.setText(ScreenMotionState.isEdgeAlertsEnabled()
-                ? "Edge Threat Alerts: ON" : "Edge Threat Alerts: OFF");
+                ? "هشدار پیرامونی: فعال" : "هشدار پیرامونی: غیرفعال");
         if (scopeCycleButton != null) scopeCycleButton.setText(scopeZoomLabel());
+        updateScopeLensVisibility();
         if (scopePositionToggle != null) scopePositionToggle.setText(
-                ScreenMotionState.isScopePositionTop() ? "Optic Position: TOP RIGHT" : "Optic Position: TOP CENTER");
-        if (confidenceValueLabel != null) confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", Math.round(ScreenMotionState.getConfidenceThreshold() * 100f)));
-        if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%",
+                ScreenMotionState.isScopePositionTop() ? "جایگاه لنز: بالا سمت راست" : "جایگاه لنز: بالا وسط");
+        if (confidenceValueLabel != null) confidenceValueLabel.setText(String.format(Locale.US, "آستانه تشخیص: %d%%", Math.round(ScreenMotionState.getConfidenceThreshold() * 100f)));
+        if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "شعاع FOV: %d%%",
                 Math.round(ScreenMotionState.getFovRadius() * 100f)));
-        if (smoothingValueLabel != null) smoothingValueLabel.setText(String.format(Locale.US, "Smoothing: %d%%",
+        if (smoothingValueLabel != null) smoothingValueLabel.setText(String.format(Locale.US, "نرمی خط راهنما: %d%%",
                 Math.round(ScreenMotionState.getSmoothingAlpha() * 100f)));
     }
 
@@ -940,110 +970,10 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
             drawPeripheralAlerts(canvas,width,height);
             drawStatusHud(canvas,width,height);
-            drawOpticalScope(canvas,width,height,boxes,locked);
             if (ScreenMotionState.getScopeZoomLevel() > 1.0f) postInvalidateDelayed(100L);
         }
 
-        private void drawOpticalScope(Canvas canvas, float width, float height,
-                ScreenMotionState.PlayerBox[] boxes, ScreenMotionState.PlayerBox locked) {
-            float zoom = ScreenMotionState.getScopeZoomLevel();
-            if (zoom <= 1.0f) return;
-            float diameter = Math.min(width, height) * 0.38f;
-            float radius = diameter * 0.5f;
-            float centerX = ScreenMotionState.isScopePositionTop()
-                    ? width - radius - dp(18) : width * 0.5f;
-            float centerY = radius + dp(52);
-            RectF lensRect = new RectF(centerX-radius, centerY-radius, centerX+radius, centerY+radius);
-            int save = canvas.save();
-            Path lensPath = new Path();
-            lensPath.addCircle(centerX, centerY, radius, Path.Direction.CW);
-            canvas.clipPath(lensPath);
-            synchronized (ScreenMotionState.SCOPE_BITMAP_LOCK) {
-                Bitmap bitmap = ScreenMotionState.getScopeBitmap();
-                if (bitmap != null && !bitmap.isRecycled()) {
-                    canvas.drawBitmap(bitmap, null, lensRect, scopeBitmapPaint);
-                } else {
-                    Paint fallback = new Paint(Paint.ANTI_ALIAS_FLAG);
-                    fallback.setColor(Color.argb(235, 8, 18, 27));
-                    canvas.drawCircle(centerX, centerY, radius, fallback);
-                    fallback.setColor(Color.rgb(0, 229, 255));
-                    fallback.setStyle(Paint.Style.STROKE);
-                    fallback.setStrokeWidth(dp(1));
-                    canvas.drawCircle(centerX, centerY, radius*0.82f, fallback);
-                }
 
-                float screenWidth = getResources().getDisplayMetrics().widthPixels;
-                float screenHeight = getResources().getDisplayMetrics().heightPixels;
-                if (boxes != null) {
-                    for (ScreenMotionState.PlayerBox box : boxes) {
-                        if (box == null) continue;
-                        AimMath.Vec2 a = AimMath.mapTargetToScopeLens(
-                                box.left, box.top, screenWidth, screenHeight, zoom);
-                        AimMath.Vec2 b = AimMath.mapTargetToScopeLens(
-                                box.right, box.bottom, screenWidth, screenHeight, zoom);
-                        if (a == null || b == null) continue;
-                        RectF projected = new RectF(
-                                centerX-radius + a.x*diameter, centerY-radius + a.y*diameter,
-                                centerX-radius + b.x*diameter, centerY-radius + b.y*diameter);
-                        if (!projected.intersect(lensRect)) continue;
-                        int color = box == locked ? Color.rgb(0,255,136)
-                                : ("VEHICLE".equals(box.category)
-                                ? Color.rgb(255,187,51) : Color.rgb(255,77,77));
-                        drawCornerBrackets(canvas, projected, color, box == locked);
-                    }
-                }
-                if (locked != null) {
-                    AimMath.Vec2 target = AimMath.computeTargetPoint(
-                            locked.left, locked.top, locked.right, locked.bottom,
-                            ScreenMotionState.isHeadZoneEnabled());
-                    AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(
-                            target.x, target.y, screenWidth, screenHeight, zoom);
-                    if (mapped != null && mapped.x >= 0f && mapped.x <= 1f
-                            && mapped.y >= 0f && mapped.y <= 1f) {
-                        float tx = centerX-radius + mapped.x*diameter;
-                        float ty = centerY-radius + mapped.y*diameter;
-                        scopeDotPaint.setColor(Color.rgb(0,255,136));
-                        canvas.drawCircle(tx, ty, dp(4), scopeDotPaint);
-                        scopeCrosshairPaint.setColor(Color.WHITE);
-                        canvas.drawCircle(tx, ty, dp(8), scopeCrosshairPaint);
-                    }
-                }
-            }
-            canvas.restoreToCount(save);
-
-            scopeCrosshairPaint.setColor(Color.argb(225, 225, 245, 250));
-            canvas.drawLine(centerX-radius*0.92f, centerY, centerX+radius*0.92f, centerY, scopeCrosshairPaint);
-            canvas.drawLine(centerX, centerY-radius*0.92f, centerX, centerY+radius*0.92f, scopeCrosshairPaint);
-            for (int i=-5; i<=5; i++) {
-                if (i==0) continue;
-                float offset = i*radius*0.13f;
-                float tick = (Math.abs(i)%2==0) ? dp(6) : dp(3);
-                canvas.drawLine(centerX+offset,centerY-tick,centerX+offset,centerY+tick,scopeCrosshairPaint);
-                canvas.drawLine(centerX-tick,centerY+offset,centerX+tick,centerY+offset,scopeCrosshairPaint);
-                if (i%2==0) {
-                    scopeDotPaint.setColor(Color.argb(220,235,250,255));
-                    canvas.drawCircle(centerX+offset,centerY,dp(2),scopeDotPaint);
-                    canvas.drawCircle(centerX,centerY+offset,dp(2),scopeDotPaint);
-                }
-            }
-            scopeBezelPaint.setStrokeWidth(dp(3));
-            scopeBezelPaint.setColor(ScreenMotionState.isOnTarget
-                    ? Color.rgb(0,255,136) : Color.rgb(0,229,255));
-            canvas.drawCircle(centerX,centerY,radius-dp(2),scopeBezelPaint);
-            scopeBezelPaint.setColor(Color.argb(155,170,210,225));
-            scopeBezelPaint.setStrokeWidth(dp(1));
-            canvas.drawCircle(centerX,centerY,radius-dp(7),scopeBezelPaint);
-
-            String badge = String.format(Locale.US, "%.1fX OPTIC", zoom);
-            float badgeWidth = scopeBadgePaint.measureText(badge)+dp(16);
-            RectF badgeRect = new RectF(centerX-badgeWidth/2f, lensRect.bottom+dp(5),
-                    centerX+badgeWidth/2f, lensRect.bottom+dp(27));
-            canvas.drawRoundRect(badgeRect,dp(7),dp(7),scopeBadgeBackground);
-            scopeBezelPaint.setColor(ScreenMotionState.isOnTarget
-                    ? Color.rgb(0,255,136) : Color.rgb(0,229,255));
-            canvas.drawRoundRect(badgeRect,dp(7),dp(7),scopeBezelPaint);
-            canvas.drawText(badge,badgeRect.left+dp(8),badgeRect.top+dp(15),scopeBadgePaint);
-        }
 
         private void drawCornerBrackets(Canvas canvas,RectF r,int color,boolean locked){
             bracketPaint.setColor(color);
@@ -1064,18 +994,17 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         }
 
         private void drawTargetTag(Canvas canvas,RectF rect,ScreenMotionState.PlayerBox box,boolean locked){
-            String range=AimMath.classifyRange(rect.width()/getWidth(),rect.height()/getHeight());
-            String text=locked?"[LOCK | "+range+" | "+Math.round(box.confidence*100f)+"%]"
-                    :("VEHICLE".equals(box.category)?"[VEH"+(box.isMoving?" | MOV":"")+"]"
-                    :"[PERSON | "+range+"]");
+            boolean close="CLOSE".equals(AimMath.classifyRange(rect.width()/getWidth(),rect.height()/getHeight()));
+            String text=locked?AimMath.formatTacticalGuidance(box.category,box.isMoving,close,ScreenMotionState.isHeadZoneEnabled())
+                    :("VEHICLE".equals(box.category)?(box.isMoving?"خودرو متحرک":"خودرو"):(close?"شخص نزدیک":"شخص"));
             float tw=labelPaint.measureText(text)+dp(12);
             float top=Math.max(dp(22),rect.top-dp(3));
-            RectF bg=new RectF(rect.left,top-dp(19),rect.left+tw,top);
+            RectF bg=new RectF(rect.left,top-dp(21),rect.left+tw,top);
             int fill=locked?Color.argb(224,0,91,72):("VEHICLE".equals(box.category)
-                    ?Color.argb(225,130,83,12):Color.argb(220,125,32,38));
+                    ?Color.argb(225,130,83,12):Color.argb(220,65,55,75));
             labelBackground.setColor(fill);
             canvas.drawRoundRect(bg,dp(4),dp(4),labelBackground);
-            canvas.drawText(text,bg.left+dp(6),bg.bottom-dp(5),labelPaint);
+            canvas.drawText(text,bg.left+dp(6),bg.bottom-dp(6),labelPaint);
         }
 
         private void drawPeripheralAlerts(Canvas canvas,float width,float height){
@@ -1109,6 +1038,116 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         }
     }
 
+    private void createScopeLensWindow() {
+        if (windowManager == null || scopeLensView != null) return;
+        scopeLensView = new ScopeLensView();
+        scopeLensParams = new WindowManager.LayoutParams(dp(170), dp(170),
+                Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        scopeLensParams.gravity = Gravity.TOP | Gravity.START;
+        scopeLensParams.x = clamp(preferences.getInt("scope_lens_x",screenWidth()-dp(186)),0,screenWidth()-dp(170));
+        scopeLensParams.y = clamp(preferences.getInt("scope_lens_y",dp(54)),0,screenHeight()-dp(170));
+        scopeLensView.setVisibility(View.GONE);
+        scopeLensView.setOnTouchListener((view,event)->{
+            switch(event.getAction()){
+                case MotionEvent.ACTION_DOWN:
+                    scopeLensDownX=event.getRawX();scopeLensDownY=event.getRawY();
+                    scopeLensStartX=scopeLensParams.x;scopeLensStartY=scopeLensParams.y;return true;
+                case MotionEvent.ACTION_MOVE:
+                    scopeLensParams.x=clamp(scopeLensStartX+Math.round(event.getRawX()-scopeLensDownX),0,screenWidth()-dp(170));
+                    scopeLensParams.y=clamp(scopeLensStartY+Math.round(event.getRawY()-scopeLensDownY),0,screenHeight()-dp(170));
+                    try{windowManager.updateViewLayout(scopeLensView,scopeLensParams);}catch(Exception ignored){}return true;
+                case MotionEvent.ACTION_UP:
+                    preferences.edit().putInt("scope_lens_x",scopeLensParams.x).putInt("scope_lens_y",scopeLensParams.y).apply();return true;
+                default:return true;
+            }
+        });
+        windowManager.addView(scopeLensView,scopeLensParams);
+    }
+
+    private void updateScopeLensVisibility(){
+        if(scopeLensView==null)return;
+        int visibility=ScreenMotionState.getScopeZoomLevel()>1f?View.VISIBLE:View.GONE;
+        if(scopeLensView.getVisibility()!=visibility)scopeLensView.setVisibility(visibility);
+        if(visibility==View.VISIBLE)scopeLensView.invalidate();
+    }
+
+    private final class ScopeLensView extends View{
+        private final Paint bitmapPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        private final Paint strokePaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fillPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint textPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path clip=new Path();
+        private final RectF lens=new RectF();
+        private final RectF target=new RectF();
+        ScopeLensView(){
+            super(OverlayService.this);setLayerType(View.LAYER_TYPE_HARDWARE,null);
+            strokePaint.setStyle(Paint.Style.STROKE);strokePaint.setStrokeWidth(dp(1));
+            textPaint.setColor(Color.WHITE);textPaint.setTextSize(dp(10));
+            textPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        }
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float cx=getWidth()/2f,cy=getHeight()/2f,radius=Math.min(getWidth(),getHeight())/2f-dp(3);
+            lens.set(cx-radius,cy-radius,cx+radius,cy+radius);
+            fillPaint.setColor(Color.rgb(5,14,22));canvas.drawCircle(cx,cy,radius,fillPaint);
+            int save=canvas.save();clip.reset();clip.addCircle(cx,cy,radius-dp(2),Path.Direction.CW);canvas.clipPath(clip);
+            synchronized(ScreenMotionState.SCOPE_BITMAP_LOCK){
+                Bitmap bitmap=ScreenMotionState.getScopeBitmap();
+                if(bitmap!=null&&!bitmap.isRecycled())canvas.drawBitmap(bitmap,null,lens,bitmapPaint);
+                ScreenMotionState.PlayerBox[] boxes=ScreenMotionState.detectedPlayers;
+                ScreenMotionState.PlayerBox locked=ScreenMotionState.getLockedTargetBox();
+                float zoom=ScreenMotionState.getScopeZoomLevel();
+                if(boxes!=null)for(ScreenMotionState.PlayerBox box:boxes){
+                    if(box==null)continue;
+                    AimMath.Vec2 p1=AimMath.mapTargetToScopeLens(box.left,box.top,screenWidth(),screenHeight(),zoom);
+                    AimMath.Vec2 p2=AimMath.mapTargetToScopeLens(box.right,box.bottom,screenWidth(),screenHeight(),zoom);
+                    if(p1==null||p2==null)continue;
+                    target.set(lens.left+p1.x*lens.width(),lens.top+p1.y*lens.height(),
+                            lens.left+p2.x*lens.width(),lens.top+p2.y*lens.height());
+                    if(!target.intersect(lens))continue;
+                    strokePaint.setColor(box==locked?Color.rgb(0,255,136):
+                            ("VEHICLE".equals(box.category)?Color.rgb(255,190,60):Color.rgb(255,85,85)));
+                    drawBrackets(canvas,target);
+                }
+                if(locked!=null){
+                    AimMath.Vec2 point=AimMath.computeTargetPoint(locked.left,locked.top,locked.right,locked.bottom,
+                            ScreenMotionState.isHeadZoneEnabled());
+                    AimMath.Vec2 mapped=AimMath.mapTargetToScopeLens(point.x,point.y,screenWidth(),screenHeight(),zoom);
+                    if(mapped!=null&&mapped.x>=0f&&mapped.x<=1f&&mapped.y>=0f&&mapped.y<=1f){
+                        float x=lens.left+mapped.x*lens.width(),y=lens.top+mapped.y*lens.height();
+                        strokePaint.setColor(Color.WHITE);canvas.drawCircle(x,y,dp(5),strokePaint);
+                        fillPaint.setColor(Color.rgb(0,255,136));canvas.drawCircle(x,y,dp(2),fillPaint);
+                    }
+                }
+            }
+            canvas.restoreToCount(save);
+            strokePaint.setColor(Color.argb(235,240,250,255));
+            canvas.drawLine(cx-radius,cy,cx+radius,cy,strokePaint);canvas.drawLine(cx,cy-radius,cx,cy+radius,strokePaint);
+            for(int i=-4;i<=4;i++)if(i!=0){
+                float offset=i*radius*0.17f,tick=i%2==0?dp(5):dp(3);
+                canvas.drawLine(cx+offset,cy-tick,cx+offset,cy+tick,strokePaint);
+                canvas.drawLine(cx-tick,cy+offset,cx+tick,cy+offset,strokePaint);
+            }
+            strokePaint.setStrokeWidth(dp(3));strokePaint.setColor(ScreenMotionState.isOnTarget?Color.GREEN:Color.CYAN);
+            canvas.drawCircle(cx,cy,radius,strokePaint);
+            String badge="دوربین زوم "+Math.round(ScreenMotionState.getScopeZoomLevel())+"X";
+            float bw=textPaint.measureText(badge)+dp(10);
+            RectF badgeRect=new RectF(cx-bw/2f,dp(5),cx+bw/2f,dp(24));
+            fillPaint.setColor(Color.argb(225,4,17,27));canvas.drawRoundRect(badgeRect,dp(5),dp(5),fillPaint);
+            canvas.drawText(badge,badgeRect.left+dp(5),badgeRect.bottom-dp(5),textPaint);
+        }
+        private void drawBrackets(Canvas canvas,RectF r){
+            float h=Math.max(dp(5),r.width()*0.22f),v=Math.max(dp(5),r.height()*0.22f);
+            canvas.drawLine(r.left,r.top,r.left+h,r.top,strokePaint);canvas.drawLine(r.left,r.top,r.left,r.top+v,strokePaint);
+            canvas.drawLine(r.right-h,r.top,r.right,r.top,strokePaint);canvas.drawLine(r.right,r.top,r.right,r.top+v,strokePaint);
+            canvas.drawLine(r.left,r.bottom-v,r.left,r.bottom,strokePaint);canvas.drawLine(r.left,r.bottom,r.left+h,r.bottom,strokePaint);
+            canvas.drawLine(r.right-h,r.bottom,r.right,r.bottom,strokePaint);canvas.drawLine(r.right,r.bottom-v,r.right,r.bottom,strokePaint);
+        }
+    }
+
     @Override
     public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
         updateValues();
@@ -1138,7 +1177,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     public void onDestroy() {
         cancelLongPress();
         mainHandler.removeCallbacks(metricsUpdater);
+        mainHandler.removeCallbacks(scopeUpdater);
         if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(this);
+        if (windowManager != null && scopeLensView != null) {
+            try { windowManager.removeView(scopeLensView); } catch (Exception ignored) {}
+        }
         if (windowManager != null && detectionView != null) {
             try { windowManager.removeView(detectionView); } catch (Exception ignored) {}
         }
@@ -1146,6 +1189,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             try { windowManager.removeView(panel); } catch (Exception ignored) {}
         }
         detectionView = null;
+        scopeLensView = null;
+        scopeLensParams = null;
+        panelContent = null;
         bubble = null;
         expandedPanel = null;
         panel = null;

@@ -117,4 +117,28 @@ public class AimMathTest {
         assertEquals(1f, lead.x, 0.0001f);
         assertEquals(0f, lead.y, 0.0001f);
     }
+
+    @Test public void strictSelfAvatarFilterUsesRequestedBounds() {
+        assertTrue(AimMath.isSelfCharacterBox(0.30f, 0.30f, 0.45f, 0.76f));
+        assertTrue(AimMath.isSelfCharacterBox(0.18f, 0.20f, 0.55f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.30f, 0.45f, 0.75f));
+        assertFalse(AimMath.isSelfCharacterBox(0.56f, 0.30f, 0.68f, 0.90f));
+        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.20f, 0.45f, 0.70f));
+    }
+
+    @Test public void formatsPersianHeadGuidance() {
+        assertEquals("روی سر • شلیک کنید", AimMath.formatTacticalGuidance("PERSON", false, false, true));
+    }
+
+    @Test public void formatsPersianCloseTargetGuidance() {
+        assertEquals("هدف نزدیک • به راست بکشید", AimMath.formatTacticalGuidance("PERSON", false, true, false));
+    }
+
+    @Test public void formatsPersianMovingVehicleGuidance() {
+        assertEquals("خودرو متحرک", AimMath.formatTacticalGuidance("VEHICLE", true, false, true));
+    }
+
+    @Test public void formatsPersianBodyGuidance() {
+        assertEquals("روی بدن • شلیک کنید", AimMath.formatTacticalGuidance("PERSON", false, false, false));
+    }
 }
