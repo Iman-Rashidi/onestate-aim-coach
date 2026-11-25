@@ -64,6 +64,33 @@ public final class AimMath {
         return union <= 0f ? 0f : intersection / union;
     }
 
+    /** Identifies the typical lower-center avatar silhouette in third-person games. */
+    public static boolean isSelfCharacterBox(
+            float left, float top, float right, float bottom) {
+        if (!isFinite(left) || !isFinite(top) || !isFinite(right) || !isFinite(bottom)) return false;
+        float width = right - left;
+        float height = bottom - top;
+        if (width <= 0f || height <= 0f) return false;
+        float centerX = (left + right) * 0.5f;
+        float centerY = (top + bottom) * 0.5f;
+        return centerX >= 0.28f && centerX <= 0.56f
+                && centerY > 0.52f && height > 0.25f;
+    }
+
+    /** Projects a target point forward by a configurable number of frame-velocity units. */
+    public static Vec2 computeLeadPoint(Vec2 targetPoint, float vx, float vy, float leadFactor) {
+        if (targetPoint == null) return null;
+        float safeVx = isFinite(vx) ? vx : 0f;
+        float safeVy = isFinite(vy) ? vy : 0f;
+        float safeFactor = isFinite(leadFactor) ? Math.max(0f, leadFactor) : 0f;
+        return new Vec2(clamp01(targetPoint.x + safeVx * safeFactor),
+                clamp01(targetPoint.y + safeVy * safeFactor));
+    }
+
+    private static boolean isFinite(float value) {
+        return !Float.isNaN(value) && !Float.isInfinite(value);
+    }
+
     private static float clamp01(float value) {
         if (Float.isNaN(value) || Float.isInfinite(value)) return 0f;
         return Math.max(0f, Math.min(1f, value));
