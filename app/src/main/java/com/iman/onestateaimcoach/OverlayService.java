@@ -229,8 +229,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.topMargin = dp(5);
         details.addView(hint, hp);
-        panelContent.addView(details);
         addVisionControls();
+        panelContent.addView(details);
         addTelemetryControls();
 
         collapse.setOnClickListener(v -> setCompact(true));
@@ -597,9 +597,32 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         confidenceValueLabel = label("", 10, Color.LTGRAY, true);
         group.addView(confidenceValueLabel);
         confidenceSeekBar = new SeekBar(this);
-        confidenceSeekBar.setMax(84);
+        confidenceSeekBar.setMax(45);
         confidenceSeekBar.setProgress(Math.round((ScreenMotionState.getConfidenceThreshold() - 0.15f) * 100f));
         group.addView(confidenceSeekBar);
+
+        group.removeView(scopeCycleButton);
+        group.addView(scopeCycleButton, 0);
+        group.removeView(selfFilterToggle);
+        group.addView(selfFilterToggle, 1);
+        group.removeView(headZoneToggle);
+        group.addView(headZoneToggle, 2);
+        group.removeView(stickyLockToggle);
+        group.addView(stickyLockToggle, 3);
+        group.removeView(showFovToggle);
+        group.addView(showFovToggle, 4);
+        group.removeView(fovValueLabel);
+        group.addView(fovValueLabel, 5);
+        group.removeView(fovSeekBar);
+        group.addView(fovSeekBar, 6);
+        group.removeView(confidenceValueLabel);
+        group.addView(confidenceValueLabel, 7);
+        group.removeView(confidenceSeekBar);
+        group.addView(confidenceSeekBar, 8);
+        group.removeView(smoothingValueLabel);
+        group.addView(smoothingValueLabel, 9);
+        group.removeView(smoothingSeekBar);
+        group.addView(smoothingSeekBar, 10);
         panelContent.addView(group);
         updateVisionControlLabels();
 
@@ -655,6 +678,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         });
         showFovToggle.setOnCheckedChangeListener((button, checked) -> {
             ScreenMotionState.setShowFovCircle(checked);
+            showFovToggle.setText(checked ? "نمایش دایره FOV: فعال" : "نمایش دایره FOV: غیرفعال");
             preferences.edit().putBoolean("vision_show_fov", checked).apply();
             if (detectionView != null) detectionView.invalidate();
         });
