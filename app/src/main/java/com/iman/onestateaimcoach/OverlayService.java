@@ -941,6 +941,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             drawPeripheralAlerts(canvas,width,height);
             drawStatusHud(canvas,width,height);
             drawOpticalScope(canvas,width,height,boxes,locked);
+            if (ScreenMotionState.getScopeZoomLevel() > 1.0f) postInvalidateDelayed(100L);
         }
 
         private void drawOpticalScope(Canvas canvas, float width, float height,
