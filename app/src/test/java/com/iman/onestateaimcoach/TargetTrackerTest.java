@@ -3,6 +3,7 @@ package com.iman.onestateaimcoach;
 import org.junit.Test;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertEquals;
 
 public class TargetTrackerTest {
     private ScreenMotionState.PlayerBox box(float l, float t, float r, float b) {
@@ -32,6 +33,16 @@ public class TargetTrackerTest {
         TargetTracker tracker = new TargetTracker(3);
         ScreenMotionState.PlayerBox outside = box(0.80f, 0.40f, 0.90f, 0.70f);
         assertNull(tracker.update(new ScreenMotionState.PlayerBox[] { outside }, 0.2f));
+    }
+
+    @Test public void computesNormalizedVelocityAcrossConsecutiveFrames() {
+        TargetTracker tracker = new TargetTracker(3);
+        ScreenMotionState.PlayerBox first = box(0.35f, 0.30f, 0.45f, 0.60f);
+        tracker.update(new ScreenMotionState.PlayerBox[] { first }, 0.8f);
+        ScreenMotionState.PlayerBox next = box(0.37f, 0.32f, 0.47f, 0.62f);
+        assertSame(next, tracker.update(new ScreenMotionState.PlayerBox[] { next }, 0.8f));
+        assertEquals(0.02f, tracker.getVelocityX(), 0.0001f);
+        assertEquals(0.02f, tracker.getVelocityY(), 0.0001f);
     }
 
     @Test public void acceptsTargetOnFovBoundary() {
