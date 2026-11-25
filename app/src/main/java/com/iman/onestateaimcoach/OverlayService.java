@@ -1008,6 +1008,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     }
                 }
             }
+            canvas.restoreToCount(save);
 
             scopeCrosshairPaint.setColor(Color.argb(225, 225, 245, 250));
             canvas.drawLine(centerX-radius*0.92f, centerY, centerX+radius*0.92f, centerY, scopeCrosshairPaint);
@@ -1024,6 +1025,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                     canvas.drawCircle(centerX,centerY+offset,dp(1.5f),scopeDotPaint);
                 }
             }
+            scopeBezelPaint.setStrokeWidth(dp(3));
             scopeBezelPaint.setColor(ScreenMotionState.isOnTarget
                     ? Color.rgb(0,255,136) : Color.rgb(0,229,255));
             canvas.drawCircle(centerX,centerY,radius-dp(2),scopeBezelPaint);
