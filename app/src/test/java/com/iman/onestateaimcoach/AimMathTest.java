@@ -47,7 +47,6 @@ public class AimMathTest {
     @Test public void nonOverlappingBoxesHaveZeroIou() {
         assertEquals(0f, AimMath.computeIoU(0f, 0f, 1f, 1f, 1.1f, 1.1f, 2f, 2f), 0.0001f);
     }
-}
     @Test public void selfCharacterFilterMatchesLowerCenterAvatar() {
         assertEquals(true, AimMath.isSelfCharacterBox(0.30f, 0.40f, 0.50f, 0.90f));
         assertEquals(true, AimMath.isSelfCharacterBox(0.34f, 0.45f, 0.54f, 0.95f));
@@ -72,3 +71,4 @@ public class AimMathTest {
         assertEquals(1f, lead.x, 0.0001f);
         assertEquals(0f, lead.y, 0.0001f);
     }
+}
