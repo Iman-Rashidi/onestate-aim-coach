@@ -3,6 +3,7 @@ package com.iman.onestateaimcoach;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertFalse;
 
 public class AimMathTest {
     @Test public void deadzoneReturnsNull() {
@@ -47,3 +48,27 @@ public class AimMathTest {
         assertEquals(0f, AimMath.computeIoU(0f, 0f, 1f, 1f, 1.1f, 1.1f, 2f, 2f), 0.0001f);
     }
 }
+    @Test public void selfCharacterFilterMatchesLowerCenterAvatar() {
+        assertEquals(true, AimMath.isSelfCharacterBox(0.30f, 0.40f, 0.50f, 0.90f));
+        assertEquals(true, AimMath.isSelfCharacterBox(0.34f, 0.45f, 0.54f, 0.95f));
+    }
+
+    @Test public void selfCharacterFilterAllowsDistantUpperAndLateralTargets() {
+        assertFalse(AimMath.isSelfCharacterBox(0.35f, 0.10f, 0.48f, 0.40f));
+        assertFalse(AimMath.isSelfCharacterBox(0.65f, 0.40f, 0.82f, 0.90f));
+        assertFalse(AimMath.isSelfCharacterBox(0.10f, 0.40f, 0.25f, 0.90f));
+    }
+
+    @Test public void computesLeadPointAlongVelocity() {
+        AimMath.Vec2 lead = AimMath.computeLeadPoint(new AimMath.Vec2(0.50f, 0.50f),
+                0.02f, -0.01f, 2f);
+        assertEquals(0.54f, lead.x, 0.0001f);
+        assertEquals(0.48f, lead.y, 0.0001f);
+    }
+
+    @Test public void clampsLeadPointToNormalizedScreenBounds() {
+        AimMath.Vec2 lead = AimMath.computeLeadPoint(new AimMath.Vec2(0.98f, 0.02f),
+                0.10f, -0.10f, 2f);
+        assertEquals(1f, lead.x, 0.0001f);
+        assertEquals(0f, lead.y, 0.0001f);
+    }
