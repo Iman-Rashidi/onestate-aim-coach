@@ -48,15 +48,26 @@ public class AimMathTest {
     @Test public void nonOverlappingBoxesHaveZeroIou() {
         assertEquals(0f, AimMath.computeIoU(0f, 0f, 1f, 1f, 1.1f, 1.1f, 2f, 2f), 0.0001f);
     }
-    @Test public void selfCharacterFilterMatchesLowerCenterAvatar() {
-        assertEquals(true, AimMath.isSelfCharacterBox(0.30f, 0.40f, 0.50f, 0.90f));
-        assertEquals(true, AimMath.isSelfCharacterBox(0.34f, 0.45f, 0.54f, 0.95f));
+    @Test public void tightSelfCharacterFilterExcludesOnlyForegroundAvatarFootprint() {
+        assertTrue(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.18f, 0.32f, 0.39f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.31f, 0.32f, 0.52f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.31f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.45f, 0.81f));
     }
 
-    @Test public void selfCharacterFilterAllowsDistantUpperAndLateralTargets() {
-        assertFalse(AimMath.isSelfCharacterBox(0.35f, 0.10f, 0.48f, 0.40f));
-        assertFalse(AimMath.isSelfCharacterBox(0.65f, 0.40f, 0.82f, 0.90f));
-        assertFalse(AimMath.isSelfCharacterBox(0.10f, 0.40f, 0.25f, 0.90f));
+    @Test public void adjacentPlayerBoxesWithFiftyFivePercentIouAreNotSuppressed() {
+        float shift = (1.0f - 0.55f) / (1.0f + 0.55f);
+        float iou = AimMath.computeIoU(0f, 0f, 1f, 1f,
+                shift, 0f, shift + 1f, 1f);
+        assertEquals(0.55f, iou, 0.0001f);
+        assertFalse(AimMath.shouldSuppressNmsDuplicate(iou));
+    }
+
+    @Test public void nmsSuppressesOnlyAboveSeventyTwoPercentIou() {
+        assertFalse(AimMath.shouldSuppressNmsDuplicate(0.72f));
+        assertTrue(AimMath.shouldSuppressNmsDuplicate(0.7201f));
     }
 
     @Test public void computesLeadPointAlongVelocity() {
@@ -119,11 +130,11 @@ public class AimMathTest {
     }
 
     @Test public void strictSelfAvatarFilterUsesRequestedBounds() {
-        assertTrue(AimMath.isSelfCharacterBox(0.30f, 0.30f, 0.45f, 0.76f));
-        assertTrue(AimMath.isSelfCharacterBox(0.18f, 0.20f, 0.55f, 0.80f));
-        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.30f, 0.45f, 0.75f));
-        assertFalse(AimMath.isSelfCharacterBox(0.56f, 0.30f, 0.68f, 0.90f));
-        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.20f, 0.45f, 0.70f));
+        assertTrue(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.18f, 0.20f, 0.39f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.32f, 0.45f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.44f, 0.80f));
     }
 
     @Test public void formatsPersianHeadGuidance() {

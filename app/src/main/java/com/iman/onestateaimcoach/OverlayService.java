@@ -524,7 +524,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         ScreenMotionState.setSelfFilterEnabled(preferences.getBoolean("vision_self_filter", true));
         ScreenMotionState.setEdgeAlertsEnabled(preferences.getBoolean("vision_edge_alerts", true));
         ScreenMotionState.setCooldownEndTimeMs(preferences.getLong("vision_cooldown_end_ms", 0L));
-        ScreenMotionState.setScopeZoomLevel(preferences.getFloat("vision_scope_zoom", 1.0f));
+        ScreenMotionState.setScopeZoomLevel(preferences.getFloat("vision_scope_zoom", 2.0f));
         ScreenMotionState.setScopePositionTop(preferences.getBoolean("vision_scope_position_top", true));
         ScreenMotionState.setConfidenceThreshold(preferences.getFloat("vision_confidence", 0.26f));
     }
@@ -849,6 +849,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
 
     private final class DetectionDrawingView extends View {
         private final Paint bracketPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint secondaryDotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint labelBackground = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint fovPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -873,6 +874,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             bracketPaint.setStyle(Paint.Style.STROKE);
             bracketPaint.setStrokeWidth(dp(2));
             bracketPaint.setStrokeCap(Paint.Cap.SQUARE);
+            secondaryDotPaint.setStyle(Paint.Style.FILL);
+            secondaryDotPaint.setColor(Color.rgb(255, 59, 48));
             labelPaint.setColor(Color.WHITE);
             labelPaint.setTextSize(dp(10));
             labelPaint.setTypeface(android.graphics.Typeface.create(
@@ -949,18 +952,26 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 }
             }
 
-            if(boxes!=null) for(ScreenMotionState.PlayerBox box:boxes){
-                if(box==null||box==locked) continue;
-                RectF rect=new RectF(box.left*width,box.top*height,box.right*width,box.bottom*height);
-                if(rect.width()<dp(8)||rect.height()<dp(12)) continue;
-                int color="VEHICLE".equals(box.category)?Color.rgb(255,187,51):Color.rgb(255,77,77);
-                drawCornerBrackets(canvas,rect,color,false);
-                drawTargetTag(canvas,rect,box,false);
+            int secondaryPersonNumber = 2;
+            if (boxes != null) {
+                for (ScreenMotionState.PlayerBox box : boxes) {
+                    if (box == null || box == locked) continue;
+                    RectF rect = new RectF(box.left * width, box.top * height,
+                            box.right * width, box.bottom * height);
+                    if (rect.width() < dp(8) || rect.height() < dp(12)) continue;
+                    boolean person = "PERSON".equals(box.category);
+                    int color = person ? Color.rgb(255, 59, 48) : Color.rgb(255, 187, 51);
+                    drawCornerBrackets(canvas, rect, color, false);
+                    int number = person ? secondaryPersonNumber++ : 0;
+                    drawTargetTag(canvas, rect, box, false, number);
+                    if (person) drawSecondaryTargetDot(canvas, box, width, height);
+                }
             }
-            if(locked!=null){
-                RectF rect=new RectF(locked.left*width,locked.top*height,locked.right*width,locked.bottom*height);
-                drawCornerBrackets(canvas,rect,Color.rgb(0,255,136),true);
-                drawTargetTag(canvas,rect,locked,true);
+            if (locked != null) {
+                RectF rect = new RectF(locked.left * width, locked.top * height,
+                        locked.right * width, locked.bottom * height);
+                drawCornerBrackets(canvas, rect, Color.rgb(0, 255, 102), true);
+                drawTargetTag(canvas, rect, locked, true, 1);
             }
 
             reticlePaint.setColor(ScreenMotionState.isOnTarget?Color.rgb(0,255,102):Color.rgb(0,220,235));
@@ -1017,18 +1028,44 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             canvas.drawLine(r.right,r.bottom-vertical,r.right,r.bottom,bracketPaint);
         }
 
-        private void drawTargetTag(Canvas canvas,RectF rect,ScreenMotionState.PlayerBox box,boolean locked){
-            boolean close="CLOSE".equals(AimMath.classifyRange(rect.width()/getWidth(),rect.height()/getHeight()));
-            String text=locked?AimMath.formatTacticalGuidance(box.category,box.isMoving,close,ScreenMotionState.isHeadZoneEnabled())
-                    :("VEHICLE".equals(box.category)?(box.isMoving?"خودرو متحرک":"خودرو"):(close?"شخص نزدیک":"شخص"));
-            float tw=labelPaint.measureText(text)+dp(12);
-            float top=Math.max(dp(22),rect.top-dp(3));
-            RectF bg=new RectF(rect.left,top-dp(21),rect.left+tw,top);
-            int fill=locked?Color.argb(224,0,91,72):("VEHICLE".equals(box.category)
-                    ?Color.argb(225,130,83,12):Color.argb(220,65,55,75));
+        private void drawTargetTag(Canvas canvas, RectF rect,
+                ScreenMotionState.PlayerBox box, boolean locked, int targetNumber) {
+            boolean close = "CLOSE".equals(AimMath.classifyRange(
+                    rect.width() / getWidth(), rect.height() / getHeight()));
+            String text;
+            if (locked) {
+                text = AimMath.formatTacticalGuidance(box.category, box.isMoving, close,
+                        ScreenMotionState.isHeadZoneEnabled());
+            } else if ("VEHICLE".equals(box.category)) {
+                text = box.isMoving ? "خودرو متحرک" : "خودرو";
+            } else {
+                text = "هدف " + targetNumber;
+            }
+            float textWidth = labelPaint.measureText(text) + dp(12);
+            float top = Math.max(dp(22), rect.top - dp(3));
+            RectF background = new RectF(rect.left, top - dp(21),
+                    rect.left + textWidth, top);
+            int fill = locked ? Color.argb(224, 0, 91, 72)
+                    : ("VEHICLE".equals(box.category)
+                    ? Color.argb(225, 130, 83, 12) : Color.argb(235, 120, 24, 20));
             labelBackground.setColor(fill);
-            canvas.drawRoundRect(bg,dp(4),dp(4),labelBackground);
-            canvas.drawText(text,bg.left+dp(6),bg.bottom-dp(6),labelPaint);
+            canvas.drawRoundRect(background, dp(4), dp(4), labelBackground);
+            canvas.drawText(text, background.left + dp(6),
+                    background.bottom - dp(6), labelPaint);
+        }
+
+        private void drawSecondaryTargetDot(Canvas canvas,
+                ScreenMotionState.PlayerBox box, float width, float height) {
+            AimMath.Vec2 point = AimMath.computeTargetPoint(box.left, box.top,
+                    box.right, box.bottom, ScreenMotionState.isHeadZoneEnabled());
+            float x = point.x * width;
+            float y = point.y * height;
+            secondaryDotPaint.setColor(Color.rgb(255, 59, 48));
+            canvas.drawCircle(x, y, dp(4), secondaryDotPaint);
+            bracketPaint.setColor(Color.WHITE);
+            bracketPaint.setStrokeWidth(dp(1));
+            canvas.drawCircle(x, y, dp(6), bracketPaint);
+            bracketPaint.setStrokeWidth(dp(2));
         }
 
         private void drawPeripheralAlerts(Canvas canvas,float width,float height){

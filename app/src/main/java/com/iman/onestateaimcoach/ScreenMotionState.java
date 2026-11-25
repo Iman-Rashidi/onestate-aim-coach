@@ -28,7 +28,7 @@ public final class ScreenMotionState {
     private static volatile int peripheralAlertMask = 0;
     private static volatile boolean edgeAlertsEnabled = true;
     private static volatile long cooldownEndTimeMs = 0L;
-    private static volatile float scopeZoomLevel = 1.0f;
+    private static volatile float scopeZoomLevel = 2.0f;
     private static volatile boolean scopePositionTop = true;
     public static final Object SCOPE_BITMAP_LOCK = new Object();
     private static final AtomicReference<Bitmap> scopeBitmap = new AtomicReference<>();

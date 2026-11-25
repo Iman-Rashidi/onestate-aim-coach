@@ -39,7 +39,6 @@ public class ScreenAnalysisService extends Service {
     private static final String EXTRA_DATA = "projection_data";
     private static final long MIN_FRAME_INTERVAL_MS = 66;
     private static final long MIN_DETECTION_INTERVAL_MS = 66;
-    private static final float NMS_IOU_THRESHOLD = 0.45f;
     private static final int GRID = 8;
     private static final int MAX_DETECTIONS = 30;
     private static final float CROP_FRACTION = 0.38f;
@@ -261,24 +260,36 @@ public class ScreenAnalysisService extends Service {
     }
 
     private List<ScreenMotionState.PlayerBox> nms(List<Candidate> candidates) {
-        Collections.sort(candidates, Comparator.comparingDouble((Candidate c) -> c.box.confidence).reversed());
+        Collections.sort(candidates,
+                Comparator.comparing((Candidate candidate) ->
+                        "VEHICLE".equals(candidate.box.category))
+                        .thenComparing(Comparator.comparingDouble(
+                                (Candidate candidate) -> candidate.box.confidence).reversed()));
         List<ScreenMotionState.PlayerBox> kept = new ArrayList<>();
         for (Candidate candidate : candidates) {
             boolean duplicate = false;
-            for (int i=0; i<kept.size(); i++) {
-                ScreenMotionState.PlayerBox old = kept.get(i), next = candidate.box;
+            for (int i = 0; i < kept.size(); i++) {
+                ScreenMotionState.PlayerBox old = kept.get(i);
+                ScreenMotionState.PlayerBox next = candidate.box;
                 if (!old.category.equals(next.category)) continue;
-                float iou = AimMath.computeIoU(old.left,old.top,old.right,old.bottom,
-                        next.left,next.top,next.right,next.bottom);
-                if (iou > NMS_IOU_THRESHOLD) {
+
+                // Only reconcile detections shared by the full-frame and zoom passes.
+                // Same-pass people are preserved as independent targets.
+                if (old.isLongRangeZoom == next.isLongRangeZoom) continue;
+
+                float iou = AimMath.computeIoU(old.left, old.top, old.right, old.bottom,
+                        next.left, next.top, next.right, next.bottom);
+                if (AimMath.shouldSuppressNmsDuplicate(iou)) {
                     duplicate = true;
-                    if (next.isMoving && !old.isMoving) kept.set(i, new ScreenMotionState.PlayerBox(
-                            old.left,old.top,old.right,old.bottom,old.confidence,old.category,true,
-                            old.isLongRangeZoom || next.isLongRangeZoom));
+                    if (next.isMoving && !old.isMoving) {
+                        kept.set(i, new ScreenMotionState.PlayerBox(
+                                old.left, old.top, old.right, old.bottom, old.confidence,
+                                old.category, true, old.isLongRangeZoom || next.isLongRangeZoom));
+                    }
                     break;
                 }
             }
-            if (!duplicate) kept.add(candidate.box);
+            if (!duplicate && kept.size() < MAX_DETECTIONS) kept.add(candidate.box);
             if (kept.size() >= MAX_DETECTIONS) break;
         }
         return kept;

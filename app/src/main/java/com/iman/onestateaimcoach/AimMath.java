@@ -53,6 +53,13 @@ public final class AimMath {
                 clamp01(cl + clamp01(right) * cw), clamp01(ct + clamp01(bottom) * ch) };
     }
 
+    public static final float NMS_IOU_THRESHOLD = 0.72f;
+
+    public static boolean shouldSuppressNmsDuplicate(float intersectionOverUnion) {
+        return isFinite(intersectionOverUnion)
+                && intersectionOverUnion > NMS_IOU_THRESHOLD;
+    }
+
     public static float computeIoU(float leftA, float topA, float rightA, float bottomA,
             float leftB, float topB, float rightB, float bottomB) {
         float iw = Math.max(0f, Math.min(rightA, rightB) - Math.max(leftA, leftB));
@@ -91,10 +98,8 @@ public final class AimMath {
         float width = right - left;
         float height = bottom - top;
         if (width <= 0f || height <= 0f) return false;
-        float centerX = (left + right) * 0.5f;
-        float centerY = (top + bottom) * 0.5f;
-        return bottom >= 0.76f && height >= 0.42f
-                && centerX >= 0.18f && centerX <= 0.55f;
+        return left >= 0.23f && right <= 0.44f
+                && bottom >= 0.80f && height >= 0.48f;
     }
 
     /** Formats concise Persian guidance for the currently locked visual detection. */
