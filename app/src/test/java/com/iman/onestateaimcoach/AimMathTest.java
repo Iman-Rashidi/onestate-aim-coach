@@ -4,6 +4,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class AimMathTest {
     @Test public void deadzoneReturnsNull() {
@@ -63,6 +64,29 @@ public class AimMathTest {
                 0.02f, -0.01f, 2f);
         assertEquals(0.54f, lead.x, 0.0001f);
         assertEquals(0.48f, lead.y, 0.0001f);
+    }
+
+    @Test public void mapsScreenCenterToOpticalLensCenter() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.5f, 0.5f, 1080f, 1920f, 2.0f);
+        assertEquals(0.5f, mapped.x, 0.0001f);
+        assertEquals(0.5f, mapped.y, 0.0001f);
+    }
+
+    @Test public void mapsPointsInsideCenteredSquareCrop() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.375f, 0.375f, 1000f, 1000f, 2.0f);
+        assertEquals(0.25f, mapped.x, 0.0001f);
+        assertEquals(0.25f, mapped.y, 0.0001f);
+    }
+
+    @Test public void preservesOutOfCropCoordinatesForLensClipping() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.10f, 0.50f, 1000f, 1000f, 2.0f);
+        assertTrue(mapped.x < 0f);
+        assertEquals(0.5f, mapped.y, 0.0001f);
+    }
+
+    @Test public void rejectsInvalidOpticalScopeDimensionsAndZoom() {
+        assertNull(AimMath.mapTargetToScopeLens(0.5f, 0.5f, 0f, 1000f, 2f));
+        assertNull(AimMath.mapTargetToScopeLens(0.5f, 0.5f, 1000f, 1000f, 1f));
     }
 
     @Test public void classifiesRangeFromNormalizedBoxHeight() {

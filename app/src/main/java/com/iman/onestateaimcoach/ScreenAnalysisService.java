@@ -136,6 +136,7 @@ public class ScreenAnalysisService extends Service {
                 Bitmap full = null, crop = null;
                 try {
                     full = imageToBitmap(buffer, rowStride, pixelStride, width, height);
+                    updateScopeBitmap(full, width, height);
                     List<Candidate> candidates = new ArrayList<>();
                     float threshold = ScreenMotionState.getConfidenceThreshold();
                     runPass(full, 0f, 0f, 1f, 1f, threshold, false, candidates);
@@ -170,6 +171,26 @@ public class ScreenAnalysisService extends Service {
                 } else fpsInitialized = true;
                 lastFpsTimestampNs = finished;
             }
+        }
+    }
+
+    private void updateScopeBitmap(Bitmap fullFrame, int screenWidth, int screenHeight) {
+        float zoom = ScreenMotionState.getScopeZoomLevel();
+        if (zoom <= 1.0f) {
+            ScreenMotionState.clearScopeBitmap();
+            return;
+        }
+        int cropSize = Math.max(1, Math.min(screenWidth, screenHeight) / Math.round(zoom));
+        if (cropSize > screenWidth || cropSize > screenHeight) return;
+        int left = (screenWidth - cropSize) / 2;
+        int top = (screenHeight - cropSize) / 2;
+        Bitmap centerCrop = null;
+        try {
+            centerCrop = Bitmap.createBitmap(fullFrame, left, top, cropSize, cropSize);
+            ScreenMotionState.setScopeBitmap(centerCrop);
+            centerCrop = null;
+        } finally {
+            if (centerCrop != null && !centerCrop.isRecycled()) centerCrop.recycle();
         }
     }
 
@@ -362,7 +383,7 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.detectedPlayers=new ScreenMotionState.PlayerBox[0];
         ScreenMotionState.aimGuideActive=false; ScreenMotionState.aimDeltaX=0f; ScreenMotionState.aimDeltaY=0f;
         ScreenMotionState.setLockedTargetBox(null); ScreenMotionState.leadTargetPoint=null;
-        ScreenMotionState.isOnTarget=false; ScreenMotionState.setVisionFps(0f);
+        ScreenMotionState.isOnTarget=false; ScreenMotionState.clearScopeBitmap(); ScreenMotionState.setVisionFps(0f);
         ScreenMotionState.setInferenceLatencyMs(0L); targetTracker.reset(); smoothedAimVector=null;
         previousGrid=null; ScreenMotionState.offsetContractReady=false;
         if (virtualDisplay!=null) virtualDisplay.release();

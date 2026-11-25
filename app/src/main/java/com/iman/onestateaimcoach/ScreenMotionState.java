@@ -1,5 +1,8 @@
 package com.iman.onestateaimcoach;
 
+import android.graphics.Bitmap;
+import java.util.concurrent.atomic.AtomicReference;
+
 /** Volatile in-memory state. Raw screenshots are not stored or uploaded. */
 public final class ScreenMotionState {
     public static volatile boolean active = false;
@@ -25,6 +28,11 @@ public final class ScreenMotionState {
     private static volatile int peripheralAlertMask = 0;
     private static volatile boolean edgeAlertsEnabled = true;
     private static volatile long cooldownEndTimeMs = 0L;
+    private static volatile float scopeZoomLevel = 1.0f;
+    private static volatile boolean scopePositionTop = true;
+    public static final Object SCOPE_BITMAP_LOCK = new Object();
+    private static final AtomicReference<Bitmap> scopeBitmap = new AtomicReference<>();
+
     public static volatile AimMath.Vec2 leadTargetPoint = null;
     public static volatile boolean isOnTarget = false;
     public static volatile float visionFps = 0f;
@@ -72,6 +80,25 @@ public final class ScreenMotionState {
     public static void setEdgeAlertsEnabled(boolean value) { edgeAlertsEnabled = value; }
     public static long getCooldownEndTimeMs() { return cooldownEndTimeMs; }
     public static void setCooldownEndTimeMs(long value) { cooldownEndTimeMs = Math.max(0L, value); }
+    public static float getScopeZoomLevel() { return scopeZoomLevel; }
+    public static void setScopeZoomLevel(float value) {
+        if (Float.isNaN(value) || Float.isInfinite(value)) value = 1.0f;
+        if (value < 1.5f) scopeZoomLevel = 1.0f;
+        else if (value < 2.5f) scopeZoomLevel = 2.0f;
+        else if (value < 3.5f) scopeZoomLevel = 3.0f;
+        else scopeZoomLevel = 4.0f;
+    }
+    public static boolean isScopePositionTop() { return scopePositionTop; }
+    public static void setScopePositionTop(boolean value) { scopePositionTop = value; }
+    public static Bitmap getScopeBitmap() { return scopeBitmap.get(); }
+    /** Transfers ownership of bitmap to this state holder and safely retires the previous frame. */
+    public static void setScopeBitmap(Bitmap bitmap) {
+        synchronized (SCOPE_BITMAP_LOCK) {
+            Bitmap previous = scopeBitmap.getAndSet(bitmap);
+            if (previous != null && previous != bitmap && !previous.isRecycled()) previous.recycle();
+        }
+    }
+    public static void clearScopeBitmap() { setScopeBitmap(null); }
     public static boolean isShowFovCircle() { return showFovCircle; }
     public static void setShowFovCircle(boolean value) { showFovCircle = value; }
     public static PlayerBox getLockedTargetBox() { return lockedTargetBox; }

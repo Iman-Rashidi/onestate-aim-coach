@@ -64,6 +64,26 @@ public final class AimMath {
         return union <= 0f ? 0f : intersection / union;
     }
 
+    /**
+     * Maps a normalized full-screen point into the normalized square optical crop.
+     * The captured crop is a centered square whose pixel side is min(screenWidth,
+     * screenHeight) / zoomLevel. Coordinates outside the crop remain outside [0, 1]
+     * so the renderer can correctly clip them at the circular lens boundary.
+     */
+    public static Vec2 mapTargetToScopeLens(
+            float targetX, float targetY, float screenWidth, float screenHeight, float zoomLevel) {
+        if (!isFinite(targetX) || !isFinite(targetY) || !isFinite(screenWidth)
+                || !isFinite(screenHeight) || !isFinite(zoomLevel)
+                || screenWidth <= 0f || screenHeight <= 0f || zoomLevel <= 1f) return null;
+        float cropPixels = Math.min(screenWidth, screenHeight) / zoomLevel;
+        float cropWidth = cropPixels / screenWidth;
+        float cropHeight = cropPixels / screenHeight;
+        float cropLeft = (1f - cropWidth) * 0.5f;
+        float cropTop = (1f - cropHeight) * 0.5f;
+        return new Vec2((targetX - cropLeft) / cropWidth,
+                (targetY - cropTop) / cropHeight);
+    }
+
     /** Identifies the typical lower-center avatar silhouette in third-person games. */
     public static boolean isSelfCharacterBox(
             float left, float top, float right, float bottom) {
