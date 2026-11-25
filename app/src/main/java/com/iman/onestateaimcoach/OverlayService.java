@@ -782,9 +782,9 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             tickPaint.setStyle(Paint.Style.STROKE);
             tickPaint.setStrokeWidth(dp(2));
             reticlePaint.setStyle(Paint.Style.STROKE);
-            reticlePaint.setStrokeWidth(dp(1.8f));
+            reticlePaint.setStrokeWidth(dp(2));
             guidancePaint.setStyle(Paint.Style.STROKE);
-            guidancePaint.setStrokeWidth(dp(1.4f));
+            guidancePaint.setStrokeWidth(dp(1));
             leadPaint.setStyle(Paint.Style.FILL);
             hudBackgroundPaint.setColor(Color.argb(204, 17, 22, 29));
             hudBorderPaint.setStyle(Paint.Style.STROKE);
