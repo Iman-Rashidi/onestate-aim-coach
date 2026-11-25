@@ -2,13 +2,13 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ['**']
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 cmake;3.22.1 ndk;27.2.12479018"
 
       - name: Download EfficientDet Lite0 model
         run: |
@@ -42,10 +42,57 @@ jobs:
           test -s app/src/main/assets/efficientdet-lite0.tflite
           ls -lh app/src/main/assets/efficientdet-lite0.tflite
 
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug --stacktrace
+      - name: Initialize build log
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          : > "$RUNNER_TEMP/build.log"
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          gradle --no-daemon testDebugUnitTest --stacktrace 2>&1 | tee -a "$RUNNER_TEMP/build.log"
+
+      - name: Assemble debug APK
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleDebug --stacktrace 2>&1 | tee -a "$RUNNER_TEMP/build.log"
+
+      - name: Append build log to step summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/build.log" ]; then
+            echo '### Last 60 build log lines' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 60 "$RUNNER_TEMP/build.log" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Build log was not created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Save failure log to ci-log branch
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ci-log
+          git rm -rf .
+          mkdir -p artifacts
+          cp "$RUNNER_TEMP/build.log" artifacts/build.log
+          git add artifacts/build.log
+          git commit -m "ci: preserve failed build log"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: onestate-aim-coach-debug-apk

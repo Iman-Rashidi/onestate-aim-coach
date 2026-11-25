@@ -1,0 +1,155 @@
+package com.iman.onestateaimcoach;
+
+import org.junit.Test;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+public class AimMathTest {
+    @Test public void deadzoneReturnsNull() {
+        assertNull(AimMath.aimDelta(new AimMath.Vec2(1f, 0f), new AimMath.Vec2(0f, 0f), 1f, 1f, 20f));
+    }
+    @Test public void scalesBySensitivity() {
+        AimMath.Vec2 result = AimMath.aimDelta(new AimMath.Vec2(4f, 2f), new AimMath.Vec2(0f, 0f), 0.5f, 0f, 100f);
+        assertEquals(2f, result.x, 0.0001f); assertEquals(1f, result.y, 0.0001f);
+    }
+    @Test public void clampsMagnitudeToMaximumSwipe() {
+        AimMath.Vec2 result = AimMath.aimDelta(new AimMath.Vec2(10f, 0f), new AimMath.Vec2(0f, 0f), 1f, 0f, 3f);
+        assertEquals(3f, result.x, 0.0001f); assertEquals(0f, result.y, 0.0001f);
+    }
+    @Test public void coneBoundaryIsInclusive() {
+        assertEquals(true, AimMath.inCone(new AimMath.Vec2(3f, 4f), new AimMath.Vec2(0f, 0f), 5f));
+    }
+    @Test public void headTargetUsesUpperEighteenPercent() {
+        AimMath.Vec2 point = AimMath.computeTargetPoint(0.2f, 0.1f, 0.6f, 0.9f, true);
+        assertEquals(0.4f, point.x, 0.0001f); assertEquals(0.244f, point.y, 0.0001f);
+    }
+    @Test public void bodyTargetUsesVerticalCenter() {
+        AimMath.Vec2 point = AimMath.computeTargetPoint(0.2f, 0.1f, 0.6f, 0.9f, false);
+        assertEquals(0.4f, point.x, 0.0001f); assertEquals(0.5f, point.y, 0.0001f);
+    }
+    @Test public void smoothVectorInterpolatesTowardCurrentVector() {
+        AimMath.Vec2 result = AimMath.smoothVector(new AimMath.Vec2(1f, 0.5f), new AimMath.Vec2(0f, 0f), 0.25f);
+        assertEquals(0.25f, result.x, 0.0001f); assertEquals(0.125f, result.y, 0.0001f);
+    }
+    @Test public void smoothingAlphaIsClamped() {
+        AimMath.Vec2 result = AimMath.smoothVector(new AimMath.Vec2(1f, 1f), new AimMath.Vec2(0f, 0f), 5f);
+        assertEquals(1f, result.x, 0.0001f); assertEquals(1f, result.y, 0.0001f);
+    }
+    @Test public void mapsCropBoxIntoFullScreenCoordinates() {
+        float[] b = AimMath.mapCropBoxToFullScreen(0.25f, 0.10f, 0.75f, 0.90f, 0.31f, 0.31f, 0.38f, 0.38f);
+        assertEquals(0.405f, b[0], 0.0001f); assertEquals(0.348f, b[1], 0.0001f);
+        assertEquals(0.595f, b[2], 0.0001f); assertEquals(0.652f, b[3], 0.0001f);
+    }
+    @Test public void computesIntersectionOverUnionForNms() {
+        assertEquals(1f / 3f, AimMath.computeIoU(0f, 0f, 2f, 2f, 1f, 0f, 3f, 2f), 0.0001f);
+    }
+    @Test public void nonOverlappingBoxesHaveZeroIou() {
+        assertEquals(0f, AimMath.computeIoU(0f, 0f, 1f, 1f, 1.1f, 1.1f, 2f, 2f), 0.0001f);
+    }
+    @Test public void tightSelfCharacterFilterExcludesOnlyForegroundAvatarFootprint() {
+        assertTrue(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.18f, 0.32f, 0.39f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.31f, 0.32f, 0.52f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.31f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.45f, 0.81f));
+    }
+
+    @Test public void adjacentPlayerBoxesWithFiftyFivePercentIouAreNotSuppressed() {
+        float shift = (1.0f - 0.55f) / (1.0f + 0.55f);
+        float iou = AimMath.computeIoU(0f, 0f, 1f, 1f,
+                shift, 0f, shift + 1f, 1f);
+        assertEquals(0.55f, iou, 0.0001f);
+        assertFalse(AimMath.shouldSuppressNmsDuplicate(iou));
+    }
+
+    @Test public void nmsSuppressesOnlyAboveSeventyTwoPercentIou() {
+        assertFalse(AimMath.shouldSuppressNmsDuplicate(0.72f));
+        assertTrue(AimMath.shouldSuppressNmsDuplicate(0.7201f));
+    }
+
+    @Test public void computesLeadPointAlongVelocity() {
+        AimMath.Vec2 lead = AimMath.computeLeadPoint(new AimMath.Vec2(0.50f, 0.50f),
+                0.02f, -0.01f, 2f);
+        assertEquals(0.54f, lead.x, 0.0001f);
+        assertEquals(0.48f, lead.y, 0.0001f);
+    }
+
+    @Test public void mapsScreenCenterToOpticalLensCenter() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.5f, 0.5f, 1080f, 1920f, 2.0f);
+        assertEquals(0.5f, mapped.x, 0.0001f);
+        assertEquals(0.5f, mapped.y, 0.0001f);
+    }
+
+    @Test public void mapsPointsInsideCenteredSquareCrop() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.375f, 0.375f, 1000f, 1000f, 2.0f);
+        assertEquals(0.25f, mapped.x, 0.0001f);
+        assertEquals(0.25f, mapped.y, 0.0001f);
+    }
+
+    @Test public void preservesOutOfCropCoordinatesForLensClipping() {
+        AimMath.Vec2 mapped = AimMath.mapTargetToScopeLens(0.10f, 0.50f, 1000f, 1000f, 2.0f);
+        assertTrue(mapped.x < 0f);
+        assertEquals(0.5f, mapped.y, 0.0001f);
+    }
+
+    @Test public void rejectsInvalidOpticalScopeDimensionsAndZoom() {
+        assertNull(AimMath.mapTargetToScopeLens(0.5f, 0.5f, 0f, 1000f, 2f));
+        assertNull(AimMath.mapTargetToScopeLens(0.5f, 0.5f, 1000f, 1000f, 1f));
+    }
+
+    @Test public void classifiesRangeFromNormalizedBoxHeight() {
+        assertEquals("CLOSE", AimMath.classifyRange(0.18f, 0.24f));
+        assertEquals("MID", AimMath.classifyRange(0.08f, 0.10f));
+        assertEquals("FAR", AimMath.classifyRange(0.04f, 0.09f));
+    }
+
+    @Test public void peripheralDirectionReturnsNoneInsideFov() {
+        assertEquals(AimMath.PERIPHERAL_NONE,
+                AimMath.computePeripheralDirection(0.52f, 0.52f, 0.20f));
+    }
+
+    @Test public void peripheralDirectionIdentifiesEachScreenEdge() {
+        assertEquals(AimMath.PERIPHERAL_LEFT,
+                AimMath.computePeripheralDirection(0.05f, 0.50f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_RIGHT,
+                AimMath.computePeripheralDirection(0.95f, 0.50f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_TOP,
+                AimMath.computePeripheralDirection(0.50f, 0.05f, 0.20f));
+        assertEquals(AimMath.PERIPHERAL_BOTTOM,
+                AimMath.computePeripheralDirection(0.50f, 0.95f, 0.20f));
+    }
+
+    @Test public void clampsLeadPointToNormalizedScreenBounds() {
+        AimMath.Vec2 lead = AimMath.computeLeadPoint(new AimMath.Vec2(0.98f, 0.02f),
+                0.10f, -0.10f, 2f);
+        assertEquals(1f, lead.x, 0.0001f);
+        assertEquals(0f, lead.y, 0.0001f);
+    }
+
+    @Test public void strictSelfAvatarFilterUsesRequestedBounds() {
+        assertTrue(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.18f, 0.20f, 0.39f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.30f, 0.32f, 0.45f, 0.80f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.32f, 0.44f, 0.79f));
+        assertFalse(AimMath.isSelfCharacterBox(0.23f, 0.33f, 0.44f, 0.80f));
+    }
+
+    @Test public void formatsPersianHeadGuidance() {
+        assertEquals("روی سر • شلیک کنید", AimMath.formatTacticalGuidance("PERSON", false, false, true));
+    }
+
+    @Test public void formatsPersianCloseTargetGuidance() {
+        assertEquals("هدف نزدیک • به راست بکشید", AimMath.formatTacticalGuidance("PERSON", false, true, false));
+    }
+
+    @Test public void formatsPersianMovingVehicleGuidance() {
+        assertEquals("خودرو متحرک", AimMath.formatTacticalGuidance("VEHICLE", true, false, true));
+    }
+
+    @Test public void formatsPersianBodyGuidance() {
+        assertEquals("روی بدن • شلیک کنید", AimMath.formatTacticalGuidance("PERSON", false, false, false));
+    }
+}
