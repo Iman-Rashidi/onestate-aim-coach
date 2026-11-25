@@ -53,6 +53,8 @@ public class ScreenAnalysisService extends Service {
     private long lastFrameAt, lastDetectionAt, lastFpsTimestampNs;
     private boolean fpsInitialized;
     private float smoothedScore;
+    private int[] scopePixelBuffer;
+    private int scopePixelBufferSize;
     private OffsetRepo offsetRepo;
     private final TargetTracker targetTracker = new TargetTracker(3);
     private AimMath.Vec2 smoothedAimVector;
@@ -131,12 +133,12 @@ public class ScreenAnalysisService extends Service {
             int rowStride = planes[0].getRowStride(), pixelStride = planes[0].getPixelStride();
             int width = image.getWidth(), height = image.getHeight();
             updateMotionGrid(buffer, rowStride, pixelStride, width, height);
+            updateScopeBitmap(buffer, rowStride, pixelStride, width, height);
             if (objectDetector != null && now - lastDetectionAt >= MIN_DETECTION_INTERVAL_MS) {
                 lastDetectionAt = now;
                 Bitmap full = null, crop = null;
                 try {
                     full = imageToBitmap(buffer, rowStride, pixelStride, width, height);
-                    updateScopeBitmap(full, width, height);
                     List<Candidate> candidates = new ArrayList<>();
                     float threshold = ScreenMotionState.getConfidenceThreshold();
                     runPass(full, 0f, 0f, 1f, 1f, threshold, false, candidates);
@@ -174,23 +176,49 @@ public class ScreenAnalysisService extends Service {
         }
     }
 
-    private void updateScopeBitmap(Bitmap fullFrame, int screenWidth, int screenHeight) {
+    private void updateScopeBitmap(ByteBuffer source, int rowStride, int pixelStride,
+            int screenWidth, int screenHeight) {
         float zoom = ScreenMotionState.getScopeZoomLevel();
         if (zoom <= 1.0f) {
             ScreenMotionState.clearScopeBitmap();
+            scopePixelBuffer = null;
+            scopePixelBufferSize = 0;
             return;
         }
         int cropSize = Math.max(1, Math.min(screenWidth, screenHeight) / Math.round(zoom));
-        if (cropSize > screenWidth || cropSize > screenHeight) return;
         int left = (screenWidth - cropSize) / 2;
         int top = (screenHeight - cropSize) / 2;
-        Bitmap centerCrop = null;
-        try {
-            centerCrop = Bitmap.createBitmap(fullFrame, left, top, cropSize, cropSize);
-            ScreenMotionState.setScopeBitmap(centerCrop);
-            centerCrop = null;
-        } finally {
-            if (centerCrop != null && !centerCrop.isRecycled()) centerCrop.recycle();
+        int pixelCount = cropSize * cropSize;
+        if (scopePixelBuffer == null || scopePixelBufferSize != cropSize) {
+            scopePixelBuffer = new int[pixelCount];
+            scopePixelBufferSize = cropSize;
+        }
+        for (int y = 0; y < cropSize; y++) {
+            int sourceY = top + y;
+            for (int x = 0; x < cropSize; x++) {
+                int sourceX = left + x;
+                int index = sourceY * rowStride + sourceX * pixelStride;
+                int pixel = Color.TRANSPARENT;
+                if (index + 3 < source.limit()) {
+                    int red = source.get(index) & 255;
+                    int green = source.get(index + 1) & 255;
+                    int blue = source.get(index + 2) & 255;
+                    int alpha = source.get(index + 3) & 255;
+                    pixel = (alpha << 24) | (red << 16) | (green << 8) | blue;
+                }
+                scopePixelBuffer[y * cropSize + x] = pixel;
+            }
+        }
+        synchronized (ScreenMotionState.SCOPE_BITMAP_LOCK) {
+            Bitmap current = ScreenMotionState.getScopeBitmap();
+            if (current == null || current.isRecycled()
+                    || current.getWidth() != cropSize || current.getHeight() != cropSize) {
+                Bitmap next = Bitmap.createBitmap(cropSize, cropSize, Bitmap.Config.ARGB_8888);
+                next.setPixels(scopePixelBuffer, 0, cropSize, 0, 0, cropSize, cropSize);
+                ScreenMotionState.setScopeBitmap(next);
+            } else {
+                current.setPixels(scopePixelBuffer, 0, cropSize, 0, 0, cropSize, cropSize);
+            }
         }
     }
 
