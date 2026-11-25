@@ -70,6 +70,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
     private CheckBox showFovToggle;
     private CheckBox longRangeToggle;
     private CheckBox vehiclesToggle;
+    private CheckBox selfFilterToggle;
     private SeekBar confidenceSeekBar;
     private TextView confidenceValueLabel;
     private SeekBar fovSeekBar;
@@ -487,6 +488,7 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         ScreenMotionState.setSmoothingAlpha(preferences.getFloat("vision_smoothing", 0.45f));
         ScreenMotionState.setLongRangeZoomEnabled(preferences.getBoolean("vision_long_range_zoom", true));
         ScreenMotionState.setDetectVehiclesEnabled(preferences.getBoolean("vision_detect_vehicles", true));
+        ScreenMotionState.setSelfFilterEnabled(preferences.getBoolean("vision_self_filter", true));
         ScreenMotionState.setConfidenceThreshold(preferences.getFloat("vision_confidence", 0.26f));
     }
 
@@ -513,6 +515,10 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         vehiclesToggle.setTextColor(Color.WHITE);
         vehiclesToggle.setChecked(ScreenMotionState.isDetectVehiclesEnabled());
         group.addView(vehiclesToggle);
+        selfFilterToggle = new CheckBox(this);
+        selfFilterToggle.setTextColor(Color.WHITE);
+        selfFilterToggle.setChecked(ScreenMotionState.isSelfFilterEnabled());
+        group.addView(selfFilterToggle);
         fovValueLabel = label("", 10, Color.LTGRAY, true);
         group.addView(fovValueLabel);
         fovSeekBar = new SeekBar(this);
@@ -554,6 +560,11 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
         vehiclesToggle.setOnCheckedChangeListener((button, checked) -> {
             ScreenMotionState.setDetectVehiclesEnabled(checked);
             preferences.edit().putBoolean("vision_detect_vehicles", checked).apply();
+            updateVisionControlLabels();
+        });
+        selfFilterToggle.setOnCheckedChangeListener((button, checked) -> {
+            ScreenMotionState.setSelfFilterEnabled(checked);
+            preferences.edit().putBoolean("vision_self_filter", checked).apply();
             updateVisionControlLabels();
         });
         confidenceSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -601,6 +612,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 ScreenMotionState.isTargetLockEnabled() ? "Sticky Lock: ON" : "Sticky Lock: OFF");
         if (longRangeToggle != null) longRangeToggle.setText(ScreenMotionState.isLongRangeZoomEnabled() ? "Long-Range Zoom: ON" : "Long-Range Zoom: OFF");
         if (vehiclesToggle != null) vehiclesToggle.setText(ScreenMotionState.isDetectVehiclesEnabled() ? "Vehicles: ON" : "Vehicles: OFF");
+        if (selfFilterToggle != null) selfFilterToggle.setText(ScreenMotionState.isSelfFilterEnabled()
+                ? "Self-Filter (3rd-Person): ON" : "Self-Filter (3rd-Person): OFF");
         if (confidenceValueLabel != null) confidenceValueLabel.setText(String.format(Locale.US, "Confidence: %d%%", Math.round(ScreenMotionState.getConfidenceThreshold() * 100f)));
         if (fovValueLabel != null) fovValueLabel.setText(String.format(Locale.US, "FOV Radius: %d%%",
                 Math.round(ScreenMotionState.getFovRadius() * 100f)));
@@ -774,9 +787,10 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             }
             if (ScreenMotionState.isShowFovCircle()) {
                 float radius = ScreenMotionState.getFovRadius() * Math.min(width, height);
-                fovPaint.setColor(locked == null
-                        ? Color.argb(190, 70, 205, 235)
-                        : Color.argb(235, 75, 225, 145));
+                fovPaint.setColor(ScreenMotionState.isOnTarget
+                        ? Color.rgb(0, 255, 102)
+                        : (locked == null ? Color.argb(190, 70, 205, 235)
+                        : Color.argb(235, 75, 225, 145)));
                 canvas.drawCircle(centerX, centerY, radius, fovPaint);
             }
 
@@ -800,6 +814,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
             }
 
             if (ScreenMotionState.aimGuideActive) {
+                int reticleColor = ScreenMotionState.isOnTarget ? Color.rgb(0, 255, 102) : Color.rgb(70, 220, 190);
+                aimCenterPaint.setColor(reticleColor);
                 float targetX = ScreenMotionState.aimTargetX * width;
                 float targetY = ScreenMotionState.aimTargetY * height;
                 float vectorX = centerX + ScreenMotionState.aimDeltaX * width;
@@ -810,11 +826,26 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 canvas.drawLine(targetX - dp(5), targetY, targetX + dp(5), targetY, targetPointPaint);
                 canvas.drawLine(targetX, targetY - dp(5), targetX, targetY + dp(5), targetPointPaint);
                 canvas.drawCircle(targetX, targetY, dp(3), targetPointPaint);
+                AimMath.Vec2 lead = ScreenMotionState.leadTargetPoint;
+                if (locked != null && locked.isMoving && lead != null) {
+                    Paint leadPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    leadPaint.setColor(Color.rgb(0, 235, 255));
+                    leadPaint.setStyle(Paint.Style.STROKE);
+                    leadPaint.setStrokeWidth(dp(1.5f));
+                    leadPaint.setPathEffect(new android.graphics.DashPathEffect(
+                            new float[] {dp(5), dp(4)}, 0f));
+                    float leadX = lead.x * width, leadY = lead.y * height;
+                    canvas.drawLine(targetX, targetY, leadX, leadY, leadPaint);
+                    leadPaint.setPathEffect(null);
+                    leadPaint.setStyle(Paint.Style.FILL);
+                    canvas.drawCircle(leadX, leadY, dp(4), leadPaint);
+                }
             }
 
             String mode = ScreenMotionState.isHeadZoneEnabled() ? "HEAD" : "BODY";
-            String hud = String.format(Locale.US, "%.1f FPS | %d ms | %s",
-                    ScreenMotionState.visionFps, ScreenMotionState.inferenceLatencyMs, mode);
+            String filter = ScreenMotionState.isSelfFilterEnabled() ? " | SELF-FILTER: ON" : "";
+            String hud = String.format(Locale.US, "%.1f FPS | %d ms | %s%s",
+                    ScreenMotionState.visionFps, ScreenMotionState.inferenceLatencyMs, mode, filter);
             float hudWidth = hudTextPaint.measureText(hud) + dp(16);
             RectF hudRect = new RectF(Math.max(dp(6), width - hudWidth - dp(8)),
                     dp(8), width - dp(8), dp(34));
