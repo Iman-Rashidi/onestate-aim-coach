@@ -192,6 +192,8 @@ public class ScreenAnalysisService extends Service {
                     r.right/bitmap.getWidth(), r.bottom/bitmap.getHeight(),
                     cropLeft, cropTop, cropWidth, cropHeight);
             String type = "person".equalsIgnoreCase(label) ? "PERSON" : "VEHICLE";
+            if ("PERSON".equals(type) && ScreenMotionState.isSelfFilterEnabled()
+                    && AimMath.isSelfCharacterBox(b[0], b[1], b[2], b[3])) continue;
             ScreenMotionState.PlayerBox box = new ScreenMotionState.PlayerBox(
                     b[0], b[1], b[2], b[3], confidence, type,
                     isBoxMoving(b[0], b[1], b[2], b[3]), zoomPass);
@@ -266,10 +268,21 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.setLockedTargetBox(selected);
         if (selected==null) {
             ScreenMotionState.aimGuideActive=false; ScreenMotionState.aimDeltaX=0f;
-            ScreenMotionState.aimDeltaY=0f; smoothedAimVector=null; return;
+            ScreenMotionState.aimDeltaY=0f; smoothedAimVector=null;
+            ScreenMotionState.leadTargetPoint=null;
+            ScreenMotionState.isOnTarget=false;
+            return;
         }
         AimMath.Vec2 point=AimMath.computeTargetPoint(selected.left,selected.top,selected.right,selected.bottom,
                 ScreenMotionState.isHeadZoneEnabled());
+        boolean centerInside = 0.5f >= selected.left && 0.5f <= selected.right
+                && 0.5f >= selected.top && 0.5f <= selected.bottom;
+        ScreenMotionState.isOnTarget = centerInside
+                || AimMath.inCone(point, new AimMath.Vec2(0.5f, 0.5f), 0.025f);
+        ScreenMotionState.leadTargetPoint = selected.isMoving
+                ? AimMath.computeLeadPoint(point, targetTracker.getVelocityX(),
+                        targetTracker.getVelocityY(), 2.0f)
+                : null;
         AimMath.Vec2 delta=AimMath.aimDelta(point,new AimMath.Vec2(0.5f,0.5f),
                 getSharedPreferences("coach_settings",MODE_PRIVATE).getInt("aim_sensitivity",50)/100f,0.01f,0.25f);
         if (delta==null) {
@@ -331,7 +344,8 @@ public class ScreenAnalysisService extends Service {
         ScreenMotionState.active=false; ScreenMotionState.level="خاموش";
         ScreenMotionState.detectedPlayers=new ScreenMotionState.PlayerBox[0];
         ScreenMotionState.aimGuideActive=false; ScreenMotionState.aimDeltaX=0f; ScreenMotionState.aimDeltaY=0f;
-        ScreenMotionState.setLockedTargetBox(null); ScreenMotionState.setVisionFps(0f);
+        ScreenMotionState.setLockedTargetBox(null); ScreenMotionState.leadTargetPoint=null;
+        ScreenMotionState.isOnTarget=false; ScreenMotionState.setVisionFps(0f);
         ScreenMotionState.setInferenceLatencyMs(0L); targetTracker.reset(); smoothedAimVector=null;
         previousGrid=null; ScreenMotionState.offsetContractReady=false;
         if (virtualDisplay!=null) virtualDisplay.release();
