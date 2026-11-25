@@ -1021,8 +1021,8 @@ public class OverlayService extends Service implements SharedPreferences.OnShare
                 canvas.drawLine(centerX-tick,centerY+offset,centerX+tick,centerY+offset,scopeCrosshairPaint);
                 if (i%2==0) {
                     scopeDotPaint.setColor(Color.argb(220,235,250,255));
-                    canvas.drawCircle(centerX+offset,centerY,dp(1.5f),scopeDotPaint);
-                    canvas.drawCircle(centerX,centerY+offset,dp(1.5f),scopeDotPaint);
+                    canvas.drawCircle(centerX+offset,centerY,dp(2),scopeDotPaint);
+                    canvas.drawCircle(centerX,centerY+offset,dp(2),scopeDotPaint);
                 }
             }
             scopeBezelPaint.setStrokeWidth(dp(3));
